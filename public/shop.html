@@ -3,42 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#f5f7f4">
+<meta name="theme-color" content="#f8f7fc">
 <title>全部商品 · 云端积分商店</title>
 <link rel="stylesheet" href="/storefront.css">
 </head>
 <body>
+<div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
 <header class="site-header">
-  <div class="container">
-    <a class="brand" href="/"><span class="brand-mark">✳</span><span data-site-name>云端积分商店</span></a>
+  <div class="container header-inner">
+    <a class="brand" href="/" aria-label="返回首页">
+      <span class="brand-mark" aria-hidden="true">✳</span>
+      <span class="brand-copy"><strong data-site-name>云端积分商店</strong><small>THE DIGITAL GOODS STORE</small></span>
+    </a>
     <nav class="nav-links" aria-label="主导航">
       <a class="nav-link" data-nav="home" href="/">首页</a>
-      <a class="nav-link" data-nav="shop" href="/shop">全部商品</a>
+      <a class="nav-link" data-nav="shop" href="/shop">探索商品</a>
       <a class="nav-link" data-nav="account" href="/account">个人中心</a>
     </nav>
     <div class="header-side">
       <span class="points-chip hidden" data-points-wrap><b data-points>0</b><span>积分</span></span>
-      <a class="account-link" href="/account"><span class="account-dot" data-account-dot>→</span><span data-account-label>登录 / 注册</span></a>
+      <a class="header-search" href="/shop" aria-label="搜索商品"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4 4" stroke-linecap="round"/></svg></a>
+      <a class="account-link" href="/account"><span class="account-dot" data-account-dot aria-hidden="true">↗</span><span data-account-label>登录 / 注册</span></a>
     </div>
   </div>
 </header>
 
 <main>
-  <section class="container page-head">
-    <div class="eyebrow">CATALOG</div>
-    <h1>商品目录</h1>
-    <p>按分类、子分类与标签筛选。兑换后的内容会立即展示，并永久保存在个人中心。</p>
+  <section class="container page-head shop-page-head">
+    <div class="breadcrumb"><a href="/">首页</a><span>/</span><b>探索商品</b></div>
+    <div class="page-heading-row"><div><div class="eyebrow"><span>THE COLLECTION</span> / FIND YOUR FAVORITES</div><h1>发现值得收藏的好物 <span class="heading-spark">✳</span></h1><p>每一次探索，都可能遇见新的喜欢。</p></div><div class="page-head-note"><span>✦</span><div>GOOD THINGS<br><b>JUST FOR YOU.</b></div></div></div>
   </section>
 
   <div class="container shop-layout">
     <aside class="filters" aria-label="商品筛选">
+      <button class="filter-heading" id="filterToggle" type="button" aria-expanded="true" aria-controls="filterContent"><span><b>筛选商品</b><small>FIND SOMETHING GOOD</small></span><span class="filter-indicator" aria-hidden="true">−</span></button>
+      <div id="filterContent">
       <div class="filter-group">
-        <div class="filter-title">分类</div>
+        <div class="filter-title">商品分类 <span>CATEGORY</span></div>
         <div id="categoryFilters"><div class="notice-line">正在读取分类…</div></div>
       </div>
       <div class="filter-group">
-        <div class="filter-title">标签</div>
+        <div class="filter-title">热门标签 <span>TAGS</span></div>
         <div class="tag-cloud" id="tagFilters"><span class="notice-line">正在读取标签…</span></div>
+      </div>
       </div>
     </aside>
 
@@ -46,7 +53,7 @@
       <div class="shop-toolbar">
         <label class="searchbox">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.4-3.4"></path></svg>
-          <input id="searchInput" type="search" placeholder="搜索商品名称或简介" autocomplete="off">
+          <input id="searchInput" type="search" aria-label="搜索商品名称或简介" placeholder="搜索你想找的好物..." autocomplete="off">
         </label>
         <select class="selectbox" id="sortSelect" aria-label="商品排序">
           <option value="recommended">推荐排序</option>
@@ -56,7 +63,7 @@
         </select>
       </div>
       <div class="toolbar-note">
-        <span id="resultCount">正在加载商品…</span>
+        <span id="resultCount" aria-live="polite">正在加载商品…</span>
         <div class="active-filters" id="activeFilters"></div>
       </div>
       <div class="product-grid" id="productGrid" style="margin-top:14px"><div class="empty-state">正在加载商品…</div></div>
@@ -65,10 +72,16 @@
 </main>
 
 <footer class="site-footer">
-  <div class="container">
-    <span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span>
-    <a href="/account" style="color:var(--muted)">个人中心 · 充值积分</a>
+  <div class="container footer-main">
+    <div class="footer-brand">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">✳</span><span class="brand-copy"><strong data-site-name>云端积分商店</strong><small>THE DIGITAL GOODS STORE</small></span></a>
+      <p>收集一点灵感，发现更多喜欢。<br>让数字好物，陪伴每一天。</p>
+    </div>
+    <div class="footer-links"><strong>探索商店</strong><a href="/shop">全部商品</a><a href="/#categories">商品分类</a></div>
+    <div class="footer-links"><strong>我的账户</strong><a href="/account">个人中心</a><a href="/account?tab=orders">我的已购</a></div>
+    <div class="footer-note"><span>MADE FOR YOUR EVERYDAY</span><b>好东西，值得<br>被好好收藏。 <i>✳</i></b></div>
   </div>
+  <div class="container footer-bottom"><span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span><span>用一点积分，兑换一点喜欢。 &nbsp; ✦</span></div>
 </footer>
 
 <div class="modal" id="deliveryModal" role="dialog" aria-modal="true" aria-labelledby="deliveryTitle">
@@ -82,9 +95,18 @@
 
 <script src="/storefront.js"></script>
 <script>
-const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, query } = Store;
+const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, query } = Store;
 let me = null, points = null, products = [], categories = [];
 const params = query();
+const mobileFilters = window.matchMedia('(max-width: 760px)');
+function setFiltersExpanded(expanded) {
+  $('#filterContent').classList.toggle('hidden', !expanded);
+  $('#filterToggle').setAttribute('aria-expanded', String(expanded));
+  $('.filter-indicator').textContent = expanded ? '−' : '+';
+}
+setFiltersExpanded(!mobileFilters.matches);
+mobileFilters.addEventListener('change', event => setFiltersExpanded(!event.matches));
+$('#filterToggle').addEventListener('click', () => setFiltersExpanded($('#filterToggle').getAttribute('aria-expanded') !== 'true'));
 const state = {
   category: params.get('category') || '',
   tag: params.get('tag') || '',
@@ -94,15 +116,7 @@ const state = {
 
 const categoryById = id => categories.find(item => item.id === id);
 const categoryLabel = id => categoryById(id)?.name || '未分类';
-const childIds = id => {
-  const ids = [id];
-  for (let i = 0; i < ids.length; i++) {
-    categories.filter(item => item.parent_id === ids[i]).forEach(item => {
-      if (!ids.includes(item.id)) ids.push(item.id);
-    });
-  }
-  return ids;
-};
+const childIds = id => categoryIds(id, categories);
 const productCountFor = id => {
   const ids = new Set(childIds(id));
   return products.filter(item => ids.has(item.category_id)).length;
@@ -141,20 +155,7 @@ function renderTagFilters() {
 }
 
 function filteredProducts() {
-  let list = products.slice();
-  if (state.category) {
-    const ids = new Set(childIds(state.category));
-    list = list.filter(item => ids.has(item.category_id));
-  }
-  if (state.tag) list = list.filter(item => (item.tags || []).includes(state.tag));
-  if (state.q) {
-    const q = state.q.toLowerCase();
-    list = list.filter(item => [item.title, item.summary, ...(item.tags || [])].join(' ').toLowerCase().includes(q));
-  }
-  if (state.sort === 'price-asc') list.sort((a, b) => Number(a.price_points) - Number(b.price_points));
-  if (state.sort === 'price-desc') list.sort((a, b) => Number(b.price_points) - Number(a.price_points));
-  if (state.sort === 'newest') list.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-  return list;
+  return filterProducts(products, categories, state);
 }
 
 function renderProducts() {
@@ -175,9 +176,7 @@ function renderProducts() {
     const enough = points === null ? null : Number(points) >= Number(product.price_points);
     const label = soldOut ? '已售罄' : (!me ? '登录后兑换' : (enough === false ? '积分不足' : '立即兑换'));
     const category = categoryLabel(product.category_id);
-    const cover = product.cover_url
-      ? `<div class="product-cover tone-${index % 4}"><img src="${esc(product.cover_url)}" alt="" loading="lazy"><span class="cover-badge">${esc(product.delivery_label || '数字交付')}</span></div>`
-      : `<div class="product-cover tone-${index % 4}"><span>${esc((category === '未分类' ? product.title : category).slice(0, 1))}</span><span class="cover-badge">${esc(product.delivery_label || '数字交付')}</span></div>`;
+    const cover = productCover(product, index);
     return `<article class="product-card">
       ${cover}
       <div class="product-body">
@@ -187,7 +186,7 @@ function renderProducts() {
         <div class="product-tags">${(product.tags || []).slice(0, 4).map(tag => `<button class="product-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div>
         <div class="product-footer">
           <div><div class="price">${Number(product.price_points)} <small>积分</small></div><div class="stock-note">${product.stock === null || product.stock === undefined ? '不限量' : soldOut ? '已售罄' : '剩余 ' + Number(product.stock)}</div></div>
-          <button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut ? 'disabled' : ''} onclick="buyProduct('${esc(product.id)}', this)">${label}</button>
+          <button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut ? 'disabled' : ''} data-buy="${esc(product.id)}">${label} <span aria-hidden="true">↗</span></button>
         </div>
       </div>
     </article>`;
@@ -271,18 +270,23 @@ $('#tagFilters').addEventListener('click', event => {
   state.tag = state.tag === button.dataset.tag ? '' : button.dataset.tag;
   applyState();
 });
-$('#productGrid').addEventListener('click', event => {
-  const tag = event.target.closest('[data-tag]');
-  if (tag) { state.tag = tag.dataset.tag; applyState(); }
-});
-$('#activeFilters').addEventListener('click', event => {
-  const button = event.target.closest('[data-clear]');
-  if (!button) return;
-  const target = button.dataset.clear;
+function clearFilter(target) {
   if (target === 'all' || target === 'category') state.category = '';
   if (target === 'all' || target === 'tag') state.tag = '';
   if (target === 'all' || target === 'q') { state.q = ''; $('#searchInput').value = ''; }
   applyState();
+}
+$('#productGrid').addEventListener('click', event => {
+  const tag = event.target.closest('[data-tag]');
+  const buy = event.target.closest('[data-buy]');
+  const clear = event.target.closest('[data-clear]');
+  if (tag) { state.tag = tag.dataset.tag; applyState(); }
+  else if (buy) buyProduct(buy.dataset.buy, buy);
+  else if (clear) clearFilter(clear.dataset.clear);
+});
+$('#activeFilters').addEventListener('click', event => {
+  const button = event.target.closest('[data-clear]');
+  if (button) clearFilter(button.dataset.clear);
 });
 let searchTimer;
 $('#searchInput').addEventListener('input', event => {
