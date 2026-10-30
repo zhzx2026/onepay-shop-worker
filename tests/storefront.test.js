@@ -8,6 +8,7 @@ const script = await readFile(new URL('../public/storefront.js', import.meta.url
 function makeStore({ config = {}, auth = {} } = {}) {
   const listeners = {};
   const nodes = {};
+  const requests = [];
   const document = {
     title: '全部商品 · 云端积分商店',
     querySelector: () => null,
@@ -23,10 +24,13 @@ function makeStore({ config = {}, auth = {} } = {}) {
     location: { search: '' },
     URLSearchParams,
     HTMLImageElement,
-    fetch: async path => ({ ok: true, json: async () => path === '/api/config' ? config : auth }),
+    fetch: async (path, options) => {
+      requests.push({ path, options });
+      return { ok: true, json: async () => path === '/api/config' ? config : auth };
+    },
   });
   vm.runInContext(script, context);
-  return { store: context.window.Store, document, nodes, listeners, HTMLImageElement };
+  return { store: context.window.Store, document, nodes, listeners, requests, HTMLImageElement };
 }
 
 test('parent category, tags, keywords and sorting are applied without mutating products', () => {
@@ -96,5 +100,26 @@ test('inline scripts in all pages parse successfully', async () => {
     const html = await readFile(new URL(`../public/${name}`, import.meta.url), 'utf8');
     const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
     for (const [, code] of scripts) if (code.trim()) assert.doesNotThrow(() => new vm.Script(code, { filename: name }));
+  }
+});
+
+
+test('storefront API requests bypass the browser cache', async () => {
+  const { store, requests } = makeStore();
+  await store.api('/api/products');
+  assert.equal(requests[0].path, '/api/products');
+  assert.equal(requests[0].options.cache, 'no-store');
+});
+
+test('storefront pages use matching versioned CSS and JavaScript assets', async () => {
+  let version;
+  for (const name of ['index.html', 'shop.html', 'account.html']) {
+    const html = await readFile(new URL(`../public/${name}`, import.meta.url), 'utf8');
+    const cssVersion = html.match(/href="\/storefront\.css\?v=([^"]+)"/)?.[1];
+    const jsVersion = html.match(/src="\/storefront\.js\?v=([^"]+)"/)?.[1];
+    assert.ok(cssVersion, `${name} should version its stylesheet`);
+    assert.equal(cssVersion, jsVersion, `${name} should use matching asset versions`);
+    version ||= cssVersion;
+    assert.equal(cssVersion, version, 'all storefront pages should use the same version');
   }
 });

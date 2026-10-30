@@ -176,6 +176,7 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
   - `/api/product`：60 秒边缘缓存
 - 后台修改站点配置、商品或分类后会立即清除当前域名的 `/api/products`、`/api/categories`、`/api/config` 缓存；商品兑换成功后也会清除商品缓存。
 - 登录态、后台接口、订单、下载和充值接口始终 `private, no-store`，不会进入公共缓存。
+- 前台 `storefront.js` 的 API 请求使用 `cache: no-store`，避免浏览器把公共数据缓存数小时；边缘缓存仍然生效。
 - 缓存响应带 `x-cache: HIT | MISS`，静态资源带 `x-cache: ASSET`，便于排查。
 
 ## 安全行为
