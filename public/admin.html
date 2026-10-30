@@ -3,160 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#f5f7f4">
+<meta name="theme-color" content="#f8f7fc">
 <title>管理后台 · 积分商店</title>
-<style>
-:root{
-  --ink:#19221b;--muted:#717a72;--line:#e1e7e1;--green:#176245;--green-dark:#104c35;
-  --bg:#f5f7f4;--white:#fff;--red:#a64032;--gold:#8a6420;--soft:#eaf4ee;
-  --shadow-sm:0 4px 16px rgba(23,32,25,.05);--ease:cubic-bezier(.2,.8,.2,1)
-}
-*{box-sizing:border-box}
-body{margin:0;color:var(--ink);background:radial-gradient(circle at 100% 0%,#ebf2ec 0,transparent 26rem),var(--bg);font:14px/1.6 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
-button,input,select,textarea{font:inherit}
-button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}
-button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgba(35,120,88,.2);outline-offset:3px}
-::selection{background:#cde5d6;color:var(--green-dark)}
-.layout{min-height:100vh;display:grid;grid-template-columns:248px minmax(0,1fr)}
-.side{background:rgba(255,255,255,.92);border-right:1px solid var(--line);padding:26px 16px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;backdrop-filter:blur(16px)}
-.brand{font-size:17px;font-weight:800;letter-spacing:-.035em;display:flex;gap:10px;align-items:center;padding:0 9px 28px;white-space:nowrap}
-.mark{width:32px;height:32px;background:linear-gradient(145deg,#237858,var(--green-dark));color:#fff;border-radius:10px;display:grid;place-items:center;box-shadow:0 6px 16px rgba(23,98,69,.18)}
-.nav{display:grid;gap:5px}
-.nav button{background:transparent;text-align:left;color:#5b655c;border-radius:11px;padding:10px 13px;min-height:42px;font-weight:650;border:1px solid transparent;cursor:pointer;transition:background .18s,color .18s,transform .18s var(--ease),border-color .18s}
-.nav button.active{background:var(--soft);color:var(--green);border-color:#dcebe1;font-weight:750;box-shadow:inset 3px 0 0 var(--green)}
-@media(hover:hover){.nav button:not(.active):hover{background:#f3f7f3;color:var(--ink);transform:translateX(2px)}}
-.sidefoot{margin-top:auto;color:var(--muted);font-size:12px;padding:16px 12px 4px;line-height:1.8}
-.main{max-width:1240px;width:100%;min-width:0;padding:32px 36px;margin:0 auto}
-.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;gap:16px;flex-wrap:wrap}
-.top h1{margin:0;font-size:28px;letter-spacing:-.04em}
-.top p{margin:5px 0 0;color:var(--muted);font-size:13px}
-.top-actions{display:flex;gap:9px;flex-wrap:wrap}
-.view{animation:view-in .3s var(--ease)}
-@keyframes view-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
-.panel{background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:16px;box-shadow:0 2px 5px rgba(23,32,25,.018)}
-.panel h2{font-size:17px;margin:0 0 5px;letter-spacing:-.025em}
-.panel .sub{color:var(--muted);font-size:12px;margin:0 0 18px}
-.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-.cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-.field{display:grid;gap:7px;margin-bottom:14px}
-.field label{font-size:12px;font-weight:700;color:#4f584e}
-.field input,.field select,.field textarea{border:1px solid var(--line);padding:10px 12px;min-height:43px;border-radius:11px;font:inherit;outline:none;background:#fff;width:100%;transition:border-color .18s,box-shadow .18s,background .18s}
-.field textarea{min-height:auto}
-.field input:hover,.field select:hover,.field textarea:hover{border-color:#c8d5ca}
-.field input:focus,.field select:focus,.field textarea:focus{border-color:#68a083;box-shadow:0 0 0 4px rgba(35,120,88,.09)}
-.field .hint{font-size:11px;color:var(--muted)}
-.btn{min-height:41px;border:1px solid transparent;border-radius:11px;padding:9px 15px;background:linear-gradient(135deg,#1d7050,var(--green));color:#fff;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;position:relative;box-shadow:0 5px 14px rgba(23,98,69,.13);transition:transform .2s var(--ease),box-shadow .2s var(--ease),background .2s,border-color .2s}
-.btn.secondary{background:#fff;color:var(--ink);border-color:var(--line);box-shadow:0 1px 2px rgba(23,32,25,.025)}
-.btn.warn{background:#fbefeb;color:var(--red);border-color:#efd7d0;box-shadow:none}
-.btn.sm{min-height:34px;padding:6px 11px;font-size:12.5px;border-radius:9px}
-.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
-.btn.is-loading{color:transparent!important;pointer-events:none}
-.btn.is-loading::after{content:"";position:absolute;width:15px;height:15px;border:2px solid #ffffff66;border-top-color:#fff;border-radius:50%;animation:spin .65s linear infinite}
-.btn.secondary.is-loading::after{border-color:#9aa69e;border-top-color:var(--green)}
-@keyframes spin{to{transform:rotate(360deg)}}
-@media(hover:hover){
-  .btn:not(:disabled):hover{transform:translateY(-2px);box-shadow:0 9px 22px rgba(23,98,69,.2)}
-  .btn.secondary:not(:disabled):hover{border-color:#c7d6ca;box-shadow:var(--shadow-sm)}
-  .btn.warn:not(:disabled):hover{background:#f8e5df;box-shadow:var(--shadow-sm)}
-}
-.btn:not(:disabled):active{transform:translateY(0) scale(.98);box-shadow:none}
-.actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:8px}
-.actions .push{margin-left:auto}
-.statusgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
-.statusbox{background:linear-gradient(145deg,#fafcfa,#f5f9f5);border:1px solid var(--line);border-radius:14px;padding:15px;transition:border-color .2s,transform .2s var(--ease)}
-.statusbox:hover{border-color:#cddbcf;transform:translateY(-1px)}
-.statusbox b{display:block;font-size:14px;margin-bottom:2px}
-.statusbox span{font-size:11px;color:var(--muted)}
-.state{background:#f8faf7;border:1px solid var(--line);border-radius:13px;padding:14px;font-size:13px;color:#4f584e}
-.state.bad{background:#fbefeb;border-color:#efd7d0;color:var(--red)}
-.data{background:#f8faf7;border:1px solid var(--line);border-radius:13px;padding:14px;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all;max-height:420px;overflow:auto;margin:0}
-.hidden{display:none!important}
-#goodsOut,#ordersOut,#usersOut{overflow-x:auto;border-radius:12px;scrollbar-width:thin}
-table{width:100%;min-width:720px;border-collapse:collapse;font-size:13px}
-th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:10px 11px;border-bottom:1px solid var(--line);white-space:nowrap;background:#fafbf9}
-td{padding:12px 11px;border-bottom:1px solid #edf1ec;vertical-align:middle}
-tbody tr{transition:background .16s}
-tbody tr:hover{background:#fafcfa}
-tr:last-child td{border-bottom:0}
-.pill{font-size:11px;font-weight:800;padding:4px 10px;border-radius:99px;white-space:nowrap;display:inline-flex}
-.pill.ok{background:#e9f4ed;color:#256648}
-.pill.off{background:#f0f1ee;color:#6d746a}
-.pill.wait{background:#fdf6e6;color:var(--gold)}
-.pill.bad{background:#fbeeea;color:var(--red)}
-.rowbtn{background:#f4f7f3;border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-size:12px;margin:2px 5px 2px 0;cursor:pointer;color:#33413a;white-space:nowrap;transition:background .18s,border-color .18s,color .18s,transform .18s}
-.rowbtn:hover{background:#eaf3ed;border-color:#cbdcce;color:var(--green);transform:translateY(-1px)}
-.rowbtn:active{transform:scale(.97)}
-.rowbtn.danger{background:#fbefeb;border-color:#f0d8d2;color:var(--red)}
-.rowbtn.danger:hover{background:#f8e4de;border-color:#e8c8bf;color:#8e3025}
-.thumb{width:44px;height:44px;border-radius:11px;object-fit:cover;background:#eef3ee;display:block}
-.cat-name{display:flex;align-items:center;gap:8px;font-weight:700}
-.cat-name.child{padding-left:26px;font-weight:600;color:#4c5a50}
-.cat-name.child::before{content:"└";color:#9baba0;font-weight:400}
-.cat-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
-.cat-tags span{font-size:10px;color:#68746b;background:#f1f5f1;border:1px solid #e4ebe4;padding:1px 6px;border-radius:99px}
-.searchbox{border:1px solid var(--line);border-radius:11px;min-height:41px;padding:9px 13px;outline:none;min-width:220px;background:#fff;transition:border-color .18s,box-shadow .18s}
-.searchbox:hover{border-color:#c8d5ca}
-.searchbox:focus{border-color:#68a083;box-shadow:0 0 0 4px rgba(35,120,88,.09)}
-.loginwrap{min-height:100vh;display:grid;place-items:center;padding:20px}
-.login{background:#fff;border:1px solid var(--line);border-radius:24px;padding:32px;width:100%;max-width:400px;box-shadow:0 24px 70px rgba(23,32,25,.1);animation:view-in .4s var(--ease)}
-.login h1{font-size:23px;margin:0 0 6px;letter-spacing:-.03em}
-.login p{color:var(--muted);font-size:13px;margin:0 0 20px}
-.login .btn{width:100%}
-.toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,16px) scale(.97);background:#15251b;color:#fff;padding:12px 18px;border:1px solid #ffffff14;border-radius:13px;box-shadow:0 14px 40px rgba(10,25,16,.22);font-size:13px;opacity:0;pointer-events:none;transition:opacity .24s,transform .28s var(--ease);z-index:90;max-width:88vw;text-align:center}
-.toast.on{opacity:1;transform:translate(-50%,0) scale(1)}
-.secret{background:#fdf7e8;border:1px solid #eddfc4;color:#7c5a17;border-radius:12px;padding:13px;font-size:12.5px;word-break:break-all}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8a9187;word-break:break-all}
-.editor{border:1px solid #d8e5da;border-radius:16px;padding:20px;background:#f9fcf9;margin-bottom:18px;animation:view-in .28s var(--ease)}
-@media(max-width:900px){
-  .layout{grid-template-columns:1fr}.side{flex-direction:row;overflow:auto;align-items:center;padding:10px 12px;position:sticky;height:auto;z-index:30;border-right:0;border-bottom:1px solid var(--line)}
-  .side .brand{padding:0 14px 0 4px}.nav{grid-auto-flow:column;display:flex}.nav button{white-space:nowrap}.nav button.active{box-shadow:inset 0 -2px 0 var(--green)}
-  .sidefoot{display:none}.main{padding:22px}.cols,.cols3{grid-template-columns:1fr}.statusgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
-@media(max-width:560px){
-  .side .brand{display:none}.main{padding:20px 14px}.top{align-items:flex-start}.top h1{font-size:25px}.top-actions{width:100%}.top-actions .btn{flex:1}
-  .panel{padding:17px;border-radius:16px}.statusgrid{grid-template-columns:1fr 1fr;gap:9px}.statusbox{padding:12px}
-  .actions.toolbar{align-items:stretch}.actions.toolbar .searchbox{width:100%;min-width:0}.actions.toolbar .push{margin-left:0;flex:1}
-  .login{padding:26px 22px}.editor{padding:16px}
-}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
-</style>
+<link rel="stylesheet" href="/admin.css?v=20261030-2">
 </head>
 <body>
 
 <div class="loginwrap" id="loginWrap">
-  <form class="login" onsubmit="login(event)">
-    <div class="brand" style="padding:0 0 18px"><span class="mark">✳</span>积分商店后台</div>
-    <h1>管理员登录</h1>
-    <p>使用已授予管理员角色的账号登录。后台与商店登录互不影响。</p>
-    <div class="field"><label>管理员邮箱</label><input id="adminEmail" type="email" autocomplete="username" placeholder="name@example.com" required></div>
-    <div class="field"><label>账号密码</label><input id="adminPassword" type="password" autocomplete="current-password" required></div>
-    <button class="btn">登录后台</button>
-    <div class="state" id="loginError" style="margin-top:12px">仅管理员角色可进入；普通账号请返回商店登录。</div>
-    <a href="/" style="display:block;margin-top:16px;color:#647267;text-decoration:none;font-size:13px">← 返回商店</a>
-  </form>
+  <div class="login-shell">
+    <div class="login-intro">
+      <div class="brand"><span class="mark">✳</span><span>积分商店后台<small>STORE MANAGEMENT</small></span></div>
+      <div class="login-intro-copy"><div class="login-kicker">YOUR STORE, SIMPLIFIED <span>✦</span></div><h2>好好经营，<br>每一份喜欢。</h2><p>从商品、订单到用户，<br>在这里轻松管理你的数字商店。</p></div>
+      <div class="login-illustration" aria-hidden="true"><span>✳</span><div><b>YOUR STORE</b><small>Everything in one place.</small></div></div>
+      <div class="login-intro-foot">A LITTLE MORE POSSIBILITY, EVERY DAY.</div>
+    </div>
+    <form class="login" onsubmit="login(event)">
+      <div class="form-kicker">STORE MANAGEMENT <span>✳</span></div>
+      <h1>欢迎回来</h1>
+      <p>登录管理后台，继续打理你的商店。</p>
+      <div class="field"><label for="adminEmail">管理员邮箱</label><input id="adminEmail" type="email" autocomplete="username" placeholder="name@example.com" required></div>
+      <div class="field"><label for="adminPassword">账号密码</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="输入账号密码" required></div>
+      <button class="btn">登录后台 <span aria-hidden="true">↗</span></button>
+      <div class="state" id="loginError" style="margin-top:16px">仅管理员角色可进入；后台与商店登录互不影响。</div>
+      <a class="back-link" href="/">← 返回商店</a>
+    </form>
+  </div>
 </div>
 
 <div class="layout hidden" id="app">
   <aside class="side">
-    <div class="brand"><span class="mark">✳</span>积分商店后台</div>
-    <nav class="nav">
-      <button class="active" onclick="tab('overview',this)">概览</button>
-      <button onclick="tab('goods',this)">商品管理</button>
-      <button onclick="tab('categories',this)">分类管理</button>
-      <button onclick="tab('orders',this)">成交订单</button>
-      <button onclick="tab('site',this)">站点配置</button>
-      <button onclick="tab('plans',this)">充值套餐</button>
-      <button onclick="tab('records',this)">平台记录</button>
-      <button onclick="tab('users',this)">用户管理</button>
-      <button onclick="tab('webhook',this)">通知与 Webhook</button>
-      <button onclick="tab('security',this)">安全设置</button>
+    <div class="brand"><span class="mark">✳</span><span>积分商店后台<small>STORE MANAGEMENT</small></span></div>
+    <div class="nav-caption">MENU <span>·</span> 工作台</div>
+    <nav class="nav" aria-label="管理导航">
+      <button class="active" aria-current="page" onclick="tab('overview',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span class="nav-label">概览</span></button>
+      <button onclick="tab('goods',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 8h16l-1 11H5L4 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/></svg></span><span class="nav-label">商品管理</span></button>
+      <button onclick="tab('categories',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Z"/><path d="M8 12h8M8 15h5"/></svg></span><span class="nav-label">分类管理</span></button>
+      <button onclick="tab('orders',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 3.5h12v17l-3-2-3 2-3-2-3 2v-17Z"/><path d="M9 8h6M9 12h6"/></svg></span><span class="nav-label">成交订单</span></button>
+      <button onclick="tab('site',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.4 3.5 5.1 3.5 8S14.5 17.6 12 20c-2.5-2.4-3.5-5.1-3.5-8S9.5 6.4 12 4Z"/></svg></span><span class="nav-label">站点配置</span></button>
+      <button onclick="tab('plans',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 10h16M8 14.5h3"/></svg></span><span class="nav-label">充值套餐</span></button>
+      <button onclick="tab('records',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg></span><span class="nav-label">平台记录</span></button>
+      <button onclick="tab('users',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 19a7 7 0 0 1 14 0M18 6a3 3 0 0 1 1 5M20 14a5 5 0 0 1 1.5 3"/></svg></span><span class="nav-label">用户管理</span></button>
+      <button onclick="tab('webhook',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 16h12l-1.5-2V10a4.5 4.5 0 0 0-9 0v4L6 16ZM10 19h4"/></svg></span><span class="nav-label">通知与 Webhook</span></button>
+      <button onclick="tab('security',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m12 3 7 3v5c0 4.2-2.8 7.7-7 10-4.2-2.3-7-5.8-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="nav-label">安全设置</span></button>
     </nav>
-    <div class="sidefoot">Cloudflare Workers · 一人付<br><span id="sideStatus">加载服务状态中…</span></div>
+    <div class="sidefoot"><div class="side-status"><span class="status-dot"></span><div><b>服务状态</b><small id="sideStatus">加载服务状态中…</small></div></div><a href="/" target="_blank" rel="noopener">查看商店 <span>↗</span></a></div>
   </aside>
 
   <main class="main">
     <header class="top">
-      <div><h1 id="pageTitle">概览</h1><p>积分由一人付收款与核销，商品与交付内容由本站在 D1 与 R2 中管理。</p></div>
+      <div><div class="top-kicker">STORE MANAGEMENT <span>/</span> <span id="pageEyebrow">OVERVIEW</span></div><h1 id="pageTitle">概览</h1><p>欢迎回来，在这里管理你的数字商店。</p></div>
       <div class="top-actions"><button class="btn secondary" onclick="loadStatus(this)">刷新状态</button><button class="btn secondary" onclick="logout()">退出</button></div>
     </header>
 
@@ -457,9 +352,11 @@ function tab(name, el) {
   active = name;
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
   $('#view-' + name).classList.remove('hidden');
-  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.nav button').forEach(b => { b.classList.remove('active'); b.removeAttribute('aria-current'); });
   el.classList.add('active');
-  $('#pageTitle').textContent = el.textContent.trim();
+  el.setAttribute('aria-current', 'page');
+  $('#pageTitle').textContent = el.querySelector('.nav-label').textContent;
+  $('#pageEyebrow').textContent = name.toUpperCase();
   if (name === 'users') loadUsers(0);
   if (name === 'orders') loadOrders();
   if (name === 'goods') { loadCategories(); loadGoods(); }

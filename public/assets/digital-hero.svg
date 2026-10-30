@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 500" fill="none">
+  <defs>
+    <linearGradient id="card" x1="191" y1="67" x2="493" y2="404" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset="1" stop-color="#eeebff"/></linearGradient>
+    <linearGradient id="violet" x1="246" y1="140" x2="425" y2="330" gradientUnits="userSpaceOnUse"><stop stop-color="#cbbdff"/><stop offset=".5" stop-color="#8c78eb"/><stop offset="1" stop-color="#6551cb"/></linearGradient>
+    <linearGradient id="glass" x1="302" y1="166" x2="427" y2="313" gradientUnits="userSpaceOnUse"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#d5cfff" stop-opacity=".45"/></linearGradient>
+    <linearGradient id="ring" x1="462" y1="273" x2="574" y2="379" gradientUnits="userSpaceOnUse"><stop stop-color="#f9e4cf"/><stop offset=".55" stop-color="#e6ad91"/><stop offset="1" stop-color="#b77570"/></linearGradient>
+    <linearGradient id="smallCard" x1="86" y1="207" x2="265" y2="316" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset="1" stop-color="#f4f1ff"/></linearGradient>
+    <radialGradient id="orb" cx="0" cy="0" r="1" gradientTransform="matrix(83 92 -95 86 454 88)" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset=".3" stop-color="#ddd5ff"/><stop offset="1" stop-color="#a99be8"/></radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feGaussianBlur in="SourceAlpha" stdDeviation="15"/><feOffset dy="18"/><feComponentTransfer><feFuncA type="linear" slope=".15"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12"/></filter>
+  </defs>
+  <ellipse cx="375" cy="422" rx="225" ry="31" fill="#7060b0" opacity=".12" filter="url(#soft)"/>
+  <circle cx="357" cy="238" r="194" stroke="#fff" stroke-opacity=".45"/>
+  <circle cx="357" cy="238" r="165" stroke="#fff" stroke-opacity=".4" stroke-dasharray="4 7"/>
+  <circle cx="492" cy="99" r="50" fill="url(#orb)" opacity=".8"/>
+  <circle cx="166" cy="138" r="10" fill="#fff" opacity=".8"/>
+  <circle cx="558" cy="186" r="6" fill="#a796ee"/>
+  <path d="M97 91v20M87 101h20M552 104v24M540 116h24M147 350v16M139 358h16" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".9"/>
+  <g transform="rotate(-10 339 238)" filter="url(#shadow)">
+    <rect x="196" y="76" width="296" height="324" rx="27" fill="url(#card)"/>
+    <rect x="196.5" y="76.5" width="295" height="323" rx="26.5" stroke="#fff"/>
+    <rect x="218" y="98" width="38" height="7" rx="3.5" fill="#b3a8da"/>
+    <rect x="261" y="98" width="20" height="7" rx="3.5" fill="#e4dff5"/>
+    <circle cx="463" cy="101.5" r="3.5" fill="#d0c8ec"/>
+    <rect x="218" y="124" width="252" height="205" rx="19" fill="#ded7fa"/>
+    <circle cx="344" cy="227" r="75" fill="url(#violet)"/>
+    <circle cx="344" cy="227" r="48" stroke="#f4eefe" stroke-opacity=".72" stroke-width="1.5"/>
+    <path d="M344 152c10 45 26 61 70 75-44 12-60 29-70 75-11-46-27-63-71-75 44-14 60-30 71-75Z" fill="url(#glass)" stroke="#fff" stroke-opacity=".75" stroke-width="1.5"/>
+    <circle cx="344" cy="227" r="12" fill="#fff" fill-opacity=".72"/>
+    <rect x="219" y="349" width="110" height="9" rx="4.5" fill="#c1b6df"/>
+    <rect x="219" y="366" width="73" height="6" rx="3" fill="#e0daf0"/>
+    <rect x="413" y="347" width="55" height="26" rx="13" fill="#e9e3ff"/>
+  </g>
+  <g transform="rotate(9 168 278)" filter="url(#shadow)">
+    <rect x="73" y="224" width="194" height="106" rx="20" fill="url(#smallCard)"/>
+    <rect x="88" y="240" width="52" height="52" rx="14" fill="#e9e3ff"/>
+    <path d="M114 250c3 13 8 18 21 21-13 4-18 9-21 22-3-13-8-18-21-22 13-3 18-8 21-21Z" fill="#8a76e2"/>
+    <rect x="151" y="246" width="91" height="8" rx="4" fill="#a89fc9"/>
+    <rect x="151" y="263" width="62" height="6" rx="3" fill="#d7d0e9"/>
+    <rect x="151" y="279" width="76" height="6" rx="3" fill="#e8e3f2"/>
+    <rect x="88" y="305" width="155" height="6" rx="3" fill="#ece8f4"/>
+  </g>
+  <g transform="rotate(18 523 333)" filter="url(#shadow)">
+    <circle cx="523" cy="333" r="61" fill="url(#ring)"/>
+    <circle cx="523" cy="333" r="50" stroke="#fff" stroke-opacity=".65" stroke-width="1.5"/>
+    <path d="M523 299c5 20 13 28 34 34-21 5-29 13-34 34-5-21-13-29-34-34 21-6 29-14 34-34Z" fill="#fff5e9" fill-opacity=".9"/>
+  </g>
+  <path d="M579 239c4 14 9 19 23 23-14 4-19 9-23 23-4-14-9-19-23-23 14-4 19-9 23-23Z" fill="#fff" opacity=".86"/>
+</svg>

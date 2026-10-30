@@ -3,43 +3,50 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#f5f7f4">
+<meta name="theme-color" content="#f8f7fc">
 <title>个人中心 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261030-1">
+<link rel="stylesheet" href="/storefront.css?v=20261030-2">
 </head>
 <body>
+<div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
 <header class="site-header">
-  <div class="container">
-    <a class="brand" href="/"><span class="brand-mark">✳</span><span data-site-name>云端积分商店</span></a>
+  <div class="container header-inner">
+    <a class="brand" href="/" aria-label="返回首页">
+      <span class="brand-mark" aria-hidden="true">✳</span>
+      <span class="brand-copy"><strong data-site-name>云端积分商店</strong><small>THE DIGITAL GOODS STORE</small></span>
+    </a>
     <nav class="nav-links" aria-label="主导航">
       <a class="nav-link" data-nav="home" href="/">首页</a>
-      <a class="nav-link" data-nav="shop" href="/shop">全部商品</a>
+      <a class="nav-link" data-nav="shop" href="/shop">探索商品</a>
       <a class="nav-link" data-nav="account" href="/account">个人中心</a>
     </nav>
     <div class="header-side">
       <span class="points-chip hidden" data-points-wrap><b data-points>0</b><span>积分</span></span>
-      <a class="account-link" href="/account"><span class="account-dot" data-account-dot>→</span><span data-account-label>个人中心</span></a>
+      <a class="header-search" href="/shop" aria-label="搜索商品"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4 4" stroke-linecap="round"/></svg></a>
+      <a class="account-link" href="/account"><span class="account-dot" data-account-dot aria-hidden="true">↗</span><span data-account-label>登录 / 注册</span></a>
     </div>
   </div>
 </header>
 
 <main class="container account-wrap">
+  <div class="breadcrumb"><a href="/">首页</a><span>/</span><b>个人中心</b></div>
   <div id="accountLoading" class="empty-state">正在读取账户信息…</div>
 
   <section id="authView" class="auth-layout hidden">
     <div class="auth-aside">
-      <div>
-        <div class="eyebrow" style="color:#a9d6bc">MEMBER ACCOUNT</div>
-        <h1>你的积分与已购内容，都在这里。</h1>
-        <p>登录后可以充值积分、兑换商品，并随时回来查看已购内容。</p>
+      <div class="auth-aside-copy">
+        <div class="auth-kicker"><span>✳</span> YOUR DIGITAL SPACE</div>
+        <h1>把喜欢的内容，<br>都收进来。</h1>
+        <p>一个属于你的数字收藏夹。<br>积分、兑换与已购内容，都在这里。</p>
       </div>
+      <div class="auth-art" aria-hidden="true"><span class="auth-art-star">✳</span><span class="auth-art-orbit"></span><div class="auth-art-card"><span>✦</span><div><b>YOUR COLLECTION</b><small>Good things, kept close.</small></div></div></div>
       <div class="auth-features">
-        <div class="auth-feature">积分余额实时核验</div>
-        <div class="auth-feature">充值入口集中在个人中心</div>
-        <div class="auth-feature">已购内容长期保存</div>
+        <div class="auth-feature"><span>✓</span> 积分余额，随时查看</div>
+        <div class="auth-feature"><span>✓</span> 已购内容，妥善收藏</div>
       </div>
     </div>
     <form class="auth-card" onsubmit="submitAuth(event)">
+      <div class="form-kicker"><span>MEMBER ACCOUNT</span><span>✳</span></div>
       <h2 id="authTitle">欢迎回来</h2>
       <p id="authDesc">登录后查看积分余额与已购内容</p>
       <div class="form-stack">
@@ -48,7 +55,7 @@
         <button class="sbtn primary block" id="authSubmit">登录</button>
       </div>
       <button class="auth-switch" type="button" id="authSwitch" onclick="toggleAuthMode()">还没有账号？创建账号</button>
-      <div class="auth-note">管理员也使用账号密码登录，但需要从独立的后台入口进入。</div>
+      <div class="auth-note"><span>✦</span><div>管理员请从独立的<a href="/admin">后台入口</a>登录。<br>你的账户与已购内容将妥善保存在这里。</div></div>
     </form>
   </section>
 
@@ -56,7 +63,7 @@
     <div class="profile-banner">
       <div class="profile-main">
         <div class="avatar" id="avatar">U</div>
-        <div><h2 id="profileEmail">账户</h2><p><span id="profileRole">普通用户</span><span class="role-pill" id="rolePill">MEMBER</span></p></div>
+        <div><div class="profile-kicker">YOUR DIGITAL SPACE</div><h2 id="profileEmail">账户</h2><p><span id="profileRole">普通用户</span><span class="role-pill" id="rolePill">MEMBER</span></p></div>
       </div>
       <div class="profile-actions">
         <a class="sbtn sm" href="/shop">浏览商品</a>
@@ -65,19 +72,19 @@
     </div>
 
     <div class="stats">
-      <div class="stat"><span>当前积分</span><b id="statPoints">—</b></div>
-      <div class="stat"><span>已使用积分</span><b id="statUsed">—</b></div>
-      <div class="stat"><span>已购内容</span><b id="statOrders">—</b></div>
+      <div class="stat"><span>当前积分 <i>✳</i></span><b id="statPoints">—</b><small>可用于兑换的积分</small></div>
+      <div class="stat"><span>已使用积分 <i>↗</i></span><b id="statUsed">—</b><small>累计兑换所用积分</small></div>
+      <div class="stat"><span>已购内容 <i>♡</i></span><b id="statOrders">—</b><small>保存在你的账户中</small></div>
     </div>
 
     <div>
       <div class="account-tabs" role="tablist">
-        <button class="account-tab active" data-account-tab="recharge">充值积分</button>
-        <button class="account-tab" data-account-tab="orders">我的已购</button>
-        <button class="account-tab" data-account-tab="profile">账户信息</button>
+        <button class="account-tab active" id="tab-recharge" role="tab" aria-selected="true" aria-controls="panel-recharge" tabindex="0" data-account-tab="recharge">充值积分</button>
+        <button class="account-tab" id="tab-orders" role="tab" aria-selected="false" aria-controls="panel-orders" tabindex="-1" data-account-tab="orders">我的已购</button>
+        <button class="account-tab" id="tab-profile" role="tab" aria-selected="false" aria-controls="panel-profile" tabindex="-1" data-account-tab="profile">账户信息</button>
       </div>
 
-      <div class="account-panel" id="panel-recharge">
+      <div class="account-panel" id="panel-recharge" role="tabpanel" aria-labelledby="tab-recharge">
         <div class="panel-box">
           <div class="panel-head">
             <div><h3>积分充值</h3><p id="planStatus">正在读取充值套餐…</p></div>
@@ -88,7 +95,7 @@
         </div>
       </div>
 
-      <div class="account-panel hidden" id="panel-orders">
+      <div class="account-panel hidden" id="panel-orders" role="tabpanel" aria-labelledby="tab-orders">
         <div class="panel-box">
           <div class="panel-head">
             <div><h3>我的已购</h3><p>兑换成功后的文本、链接和文件都会保存在这里。</p></div>
@@ -101,7 +108,7 @@
         </div>
       </div>
 
-      <div class="account-panel hidden" id="panel-profile">
+      <div class="account-panel hidden" id="panel-profile" role="tabpanel" aria-labelledby="tab-profile">
         <div class="panel-box">
           <div class="panel-head"><div><h3>账户信息</h3><p>账号身份与当前登录信息。</p></div></div>
           <div class="info-list">
@@ -121,10 +128,16 @@
 </main>
 
 <footer class="site-footer">
-  <div class="container">
-    <span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span>
-    <a href="/shop" style="color:var(--muted)">全部商品</a>
+  <div class="container footer-main">
+    <div class="footer-brand">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">✳</span><span class="brand-copy"><strong data-site-name>云端积分商店</strong><small>THE DIGITAL GOODS STORE</small></span></a>
+      <p>收集一点灵感，发现更多喜欢。<br>让数字好物，陪伴每一天。</p>
+    </div>
+    <div class="footer-links"><strong>探索商店</strong><a href="/shop">全部商品</a><a href="/#categories">商品分类</a></div>
+    <div class="footer-links"><strong>我的账户</strong><a href="/account">个人中心</a><a href="/account?tab=orders">我的已购</a></div>
+    <div class="footer-note"><span>MADE FOR YOUR EVERYDAY</span><b>好东西，值得<br>被好好收藏。 <i>✳</i></b></div>
   </div>
+  <div class="container footer-bottom"><span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span><span>用一点积分，兑换一点喜欢。 &nbsp; ✦</span></div>
 </footer>
 
 <div class="modal" id="payModal" role="dialog" aria-modal="true" aria-labelledby="payTitle">
@@ -146,7 +159,7 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261030-1"></script>
+<script src="/storefront.js?v=20261030-2"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
 let me = null, points = null, authMode = 'login';
@@ -339,7 +352,12 @@ async function syncOrders(button) {
 }
 
 function switchTab(name, updateUrl = true) {
-  $$('.account-tab').forEach(button => button.classList.toggle('active', button.dataset.accountTab === name));
+  $$('.account-tab').forEach(button => {
+    const selected = button.dataset.accountTab === name;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
   $$('.account-panel').forEach(panel => panel.classList.add('hidden'));
   $('#panel-' + name).classList.remove('hidden');
   if (updateUrl) {
@@ -349,7 +367,21 @@ function switchTab(name, updateUrl = true) {
   }
 }
 
-$$('.account-tab').forEach(button => button.addEventListener('click', () => switchTab(button.dataset.accountTab)));
+const accountTabs = $$('.account-tab');
+accountTabs.forEach((button, index) => {
+  button.addEventListener('click', () => switchTab(button.dataset.accountTab));
+  button.addEventListener('keydown', event => {
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % accountTabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + accountTabs.length) % accountTabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = accountTabs.length - 1;
+    else return;
+    event.preventDefault();
+    switchTab(accountTabs[next].dataset.accountTab);
+    accountTabs[next].focus();
+  });
+});
 $('#year').textContent = new Date().getFullYear();
 
 (async () => {

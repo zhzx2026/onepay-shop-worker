@@ -78,14 +78,63 @@
     const me = auth.authenticated ? auth.user : null;
     if (config.siteName) {
       $$('[data-site-name]').forEach(node => { node.textContent = config.siteName; });
-      document.title = document.title.replace(/积分商店|云端积分商店/g, config.siteName);
+      document.title = document.title.replace(/云端积分商店|积分商店/g, () => config.siteName);
     }
     if (config.description) $$('[data-site-description]').forEach(node => { node.textContent = config.description; });
-    $$('[data-nav]').forEach(node => node.classList.toggle('active', node.dataset.nav === active));
+    $$('[data-nav]').forEach(node => {
+      const selected = node.dataset.nav === active;
+      node.classList.toggle('active', selected);
+      if (selected) node.setAttribute('aria-current', 'page');
+      else node.removeAttribute('aria-current');
+    });
     $$('[data-account-label]').forEach(node => { node.textContent = me ? '个人中心' : '登录 / 注册'; });
     $$('[data-account-dot]').forEach(node => { node.textContent = me ? (me.email || 'U').slice(0, 1).toUpperCase() : '→'; });
     return { config, me };
   }
+
+  function categoryIds(id, categories) {
+    const ids = [id];
+    for (let i = 0; i < ids.length; i++) {
+      categories.filter(item => item.parent_id === ids[i]).forEach(item => {
+        if (!ids.includes(item.id)) ids.push(item.id);
+      });
+    }
+    return ids;
+  }
+
+  function filterProducts(products, categories, state) {
+    let list = products.slice();
+    if (state.category) {
+      const ids = new Set(categoryIds(state.category, categories));
+      list = list.filter(item => ids.has(item.category_id));
+    }
+    if (state.tag) list = list.filter(item => (item.tags || []).includes(state.tag));
+    if (state.q) {
+      const q = state.q.toLowerCase();
+      list = list.filter(item => [item.title, item.summary, ...(item.tags || [])].join(' ').toLowerCase().includes(q));
+    }
+    if (state.sort === 'price-asc') list.sort((a, b) => Number(a.price_points) - Number(b.price_points));
+    if (state.sort === 'price-desc') list.sort((a, b) => Number(b.price_points) - Number(a.price_points));
+    if (state.sort === 'newest') list.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return list;
+  }
+
+  function productCover(product, index = 0) {
+    const hash = Array.from(String(product.id || '')).reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0);
+    const art = product.id ? hash % 4 : Math.abs(index) % 4;
+    const fallback = `/assets/product-${art + 1}.svg`;
+    const source = product.cover_url || fallback;
+    const fallbackAttr = product.cover_url ? ` data-cover-fallback="${fallback}"` : '';
+    return `<div class="product-cover"><img src="${esc(source)}"${fallbackAttr} alt="" loading="lazy"><span class="cover-badge">${esc(product.delivery_label || '数字交付')}</span></div>`;
+  }
+
+  document.addEventListener('error', event => {
+    const image = event.target;
+    if (image instanceof HTMLImageElement && image.dataset.coverFallback) {
+      image.src = image.dataset.coverFallback;
+      delete image.dataset.coverFallback;
+    }
+  }, true);
 
   function setPoints(points) {
     const valid = points !== null && points !== undefined && Number.isFinite(Number(points));
@@ -132,5 +181,5 @@
     return new URLSearchParams(location.search);
   }
 
-  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, setPoints, deliveryHtml, copyText, query };
+  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, copyText, query };
 })();
