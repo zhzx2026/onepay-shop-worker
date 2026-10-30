@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local-only testing; never commit real values.
+YIRENFU_API_KEY=replace_with_server_side_project_key
+# Only after configuring webhook in the admin page:
+YIRENFU_WEBHOOK_SECRET=replace_with_webhook_secret

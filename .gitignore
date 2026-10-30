@@ -1,0 +1,6 @@
+node_modules/
+.dev.vars
+.wrangler/
+.config/
+.workbuddy-ai/
+.DS_Store

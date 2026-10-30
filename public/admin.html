@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f5f7f4">
+<title>管理后台 · 积分商店</title>
+<style>
+:root{
+  --ink:#19221b;--muted:#717a72;--line:#e1e7e1;--green:#176245;--green-dark:#104c35;
+  --bg:#f5f7f4;--white:#fff;--red:#a64032;--gold:#8a6420;--soft:#eaf4ee;
+  --shadow-sm:0 4px 16px rgba(23,32,25,.05);--ease:cubic-bezier(.2,.8,.2,1)
+}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);background:radial-gradient(circle at 100% 0%,#ebf2ec 0,transparent 26rem),var(--bg);font:14px/1.6 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit}
+button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgba(35,120,88,.2);outline-offset:3px}
+::selection{background:#cde5d6;color:var(--green-dark)}
+.layout{min-height:100vh;display:grid;grid-template-columns:248px minmax(0,1fr)}
+.side{background:rgba(255,255,255,.92);border-right:1px solid var(--line);padding:26px 16px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;backdrop-filter:blur(16px)}
+.brand{font-size:17px;font-weight:800;letter-spacing:-.035em;display:flex;gap:10px;align-items:center;padding:0 9px 28px;white-space:nowrap}
+.mark{width:32px;height:32px;background:linear-gradient(145deg,#237858,var(--green-dark));color:#fff;border-radius:10px;display:grid;place-items:center;box-shadow:0 6px 16px rgba(23,98,69,.18)}
+.nav{display:grid;gap:5px}
+.nav button{background:transparent;text-align:left;color:#5b655c;border-radius:11px;padding:10px 13px;min-height:42px;font-weight:650;border:1px solid transparent;cursor:pointer;transition:background .18s,color .18s,transform .18s var(--ease),border-color .18s}
+.nav button.active{background:var(--soft);color:var(--green);border-color:#dcebe1;font-weight:750;box-shadow:inset 3px 0 0 var(--green)}
+@media(hover:hover){.nav button:not(.active):hover{background:#f3f7f3;color:var(--ink);transform:translateX(2px)}}
+.sidefoot{margin-top:auto;color:var(--muted);font-size:12px;padding:16px 12px 4px;line-height:1.8}
+.main{max-width:1240px;width:100%;min-width:0;padding:32px 36px;margin:0 auto}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;gap:16px;flex-wrap:wrap}
+.top h1{margin:0;font-size:28px;letter-spacing:-.04em}
+.top p{margin:5px 0 0;color:var(--muted);font-size:13px}
+.top-actions{display:flex;gap:9px;flex-wrap:wrap}
+.view{animation:view-in .3s var(--ease)}
+@keyframes view-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+.panel{background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:16px;box-shadow:0 2px 5px rgba(23,32,25,.018)}
+.panel h2{font-size:17px;margin:0 0 5px;letter-spacing:-.025em}
+.panel .sub{color:var(--muted);font-size:12px;margin:0 0 18px}
+.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.field{display:grid;gap:7px;margin-bottom:14px}
+.field label{font-size:12px;font-weight:700;color:#4f584e}
+.field input,.field select,.field textarea{border:1px solid var(--line);padding:10px 12px;min-height:43px;border-radius:11px;font:inherit;outline:none;background:#fff;width:100%;transition:border-color .18s,box-shadow .18s,background .18s}
+.field textarea{min-height:auto}
+.field input:hover,.field select:hover,.field textarea:hover{border-color:#c8d5ca}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:#68a083;box-shadow:0 0 0 4px rgba(35,120,88,.09)}
+.field .hint{font-size:11px;color:var(--muted)}
+.btn{min-height:41px;border:1px solid transparent;border-radius:11px;padding:9px 15px;background:linear-gradient(135deg,#1d7050,var(--green));color:#fff;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;position:relative;box-shadow:0 5px 14px rgba(23,98,69,.13);transition:transform .2s var(--ease),box-shadow .2s var(--ease),background .2s,border-color .2s}
+.btn.secondary{background:#fff;color:var(--ink);border-color:var(--line);box-shadow:0 1px 2px rgba(23,32,25,.025)}
+.btn.warn{background:#fbefeb;color:var(--red);border-color:#efd7d0;box-shadow:none}
+.btn.sm{min-height:34px;padding:6px 11px;font-size:12.5px;border-radius:9px}
+.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.btn.is-loading{color:transparent!important;pointer-events:none}
+.btn.is-loading::after{content:"";position:absolute;width:15px;height:15px;border:2px solid #ffffff66;border-top-color:#fff;border-radius:50%;animation:spin .65s linear infinite}
+.btn.secondary.is-loading::after{border-color:#9aa69e;border-top-color:var(--green)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(hover:hover){
+  .btn:not(:disabled):hover{transform:translateY(-2px);box-shadow:0 9px 22px rgba(23,98,69,.2)}
+  .btn.secondary:not(:disabled):hover{border-color:#c7d6ca;box-shadow:var(--shadow-sm)}
+  .btn.warn:not(:disabled):hover{background:#f8e5df;box-shadow:var(--shadow-sm)}
+}
+.btn:not(:disabled):active{transform:translateY(0) scale(.98);box-shadow:none}
+.actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.actions .push{margin-left:auto}
+.statusgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.statusbox{background:linear-gradient(145deg,#fafcfa,#f5f9f5);border:1px solid var(--line);border-radius:14px;padding:15px;transition:border-color .2s,transform .2s var(--ease)}
+.statusbox:hover{border-color:#cddbcf;transform:translateY(-1px)}
+.statusbox b{display:block;font-size:14px;margin-bottom:2px}
+.statusbox span{font-size:11px;color:var(--muted)}
+.state{background:#f8faf7;border:1px solid var(--line);border-radius:13px;padding:14px;font-size:13px;color:#4f584e}
+.state.bad{background:#fbefeb;border-color:#efd7d0;color:var(--red)}
+.data{background:#f8faf7;border:1px solid var(--line);border-radius:13px;padding:14px;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all;max-height:420px;overflow:auto;margin:0}
+.hidden{display:none!important}
+#goodsOut,#ordersOut,#usersOut{overflow-x:auto;border-radius:12px;scrollbar-width:thin}
+table{width:100%;min-width:720px;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:10px 11px;border-bottom:1px solid var(--line);white-space:nowrap;background:#fafbf9}
+td{padding:12px 11px;border-bottom:1px solid #edf1ec;vertical-align:middle}
+tbody tr{transition:background .16s}
+tbody tr:hover{background:#fafcfa}
+tr:last-child td{border-bottom:0}
+.pill{font-size:11px;font-weight:800;padding:4px 10px;border-radius:99px;white-space:nowrap;display:inline-flex}
+.pill.ok{background:#e9f4ed;color:#256648}
+.pill.off{background:#f0f1ee;color:#6d746a}
+.pill.wait{background:#fdf6e6;color:var(--gold)}
+.pill.bad{background:#fbeeea;color:var(--red)}
+.rowbtn{background:#f4f7f3;border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-size:12px;margin:2px 5px 2px 0;cursor:pointer;color:#33413a;white-space:nowrap;transition:background .18s,border-color .18s,color .18s,transform .18s}
+.rowbtn:hover{background:#eaf3ed;border-color:#cbdcce;color:var(--green);transform:translateY(-1px)}
+.rowbtn:active{transform:scale(.97)}
+.rowbtn.danger{background:#fbefeb;border-color:#f0d8d2;color:var(--red)}
+.rowbtn.danger:hover{background:#f8e4de;border-color:#e8c8bf;color:#8e3025}
+.thumb{width:44px;height:44px;border-radius:11px;object-fit:cover;background:#eef3ee;display:block}
+.cat-name{display:flex;align-items:center;gap:8px;font-weight:700}
+.cat-name.child{padding-left:26px;font-weight:600;color:#4c5a50}
+.cat-name.child::before{content:"└";color:#9baba0;font-weight:400}
+.cat-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.cat-tags span{font-size:10px;color:#68746b;background:#f1f5f1;border:1px solid #e4ebe4;padding:1px 6px;border-radius:99px}
+.searchbox{border:1px solid var(--line);border-radius:11px;min-height:41px;padding:9px 13px;outline:none;min-width:220px;background:#fff;transition:border-color .18s,box-shadow .18s}
+.searchbox:hover{border-color:#c8d5ca}
+.searchbox:focus{border-color:#68a083;box-shadow:0 0 0 4px rgba(35,120,88,.09)}
+.loginwrap{min-height:100vh;display:grid;place-items:center;padding:20px}
+.login{background:#fff;border:1px solid var(--line);border-radius:24px;padding:32px;width:100%;max-width:400px;box-shadow:0 24px 70px rgba(23,32,25,.1);animation:view-in .4s var(--ease)}
+.login h1{font-size:23px;margin:0 0 6px;letter-spacing:-.03em}
+.login p{color:var(--muted);font-size:13px;margin:0 0 20px}
+.login .btn{width:100%}
+.toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,16px) scale(.97);background:#15251b;color:#fff;padding:12px 18px;border:1px solid #ffffff14;border-radius:13px;box-shadow:0 14px 40px rgba(10,25,16,.22);font-size:13px;opacity:0;pointer-events:none;transition:opacity .24s,transform .28s var(--ease);z-index:90;max-width:88vw;text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0) scale(1)}
+.secret{background:#fdf7e8;border:1px solid #eddfc4;color:#7c5a17;border-radius:12px;padding:13px;font-size:12.5px;word-break:break-all}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8a9187;word-break:break-all}
+.editor{border:1px solid #d8e5da;border-radius:16px;padding:20px;background:#f9fcf9;margin-bottom:18px;animation:view-in .28s var(--ease)}
+@media(max-width:900px){
+  .layout{grid-template-columns:1fr}.side{flex-direction:row;overflow:auto;align-items:center;padding:10px 12px;position:sticky;height:auto;z-index:30;border-right:0;border-bottom:1px solid var(--line)}
+  .side .brand{padding:0 14px 0 4px}.nav{grid-auto-flow:column;display:flex}.nav button{white-space:nowrap}.nav button.active{box-shadow:inset 0 -2px 0 var(--green)}
+  .sidefoot{display:none}.main{padding:22px}.cols,.cols3{grid-template-columns:1fr}.statusgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:560px){
+  .side .brand{display:none}.main{padding:20px 14px}.top{align-items:flex-start}.top h1{font-size:25px}.top-actions{width:100%}.top-actions .btn{flex:1}
+  .panel{padding:17px;border-radius:16px}.statusgrid{grid-template-columns:1fr 1fr;gap:9px}.statusbox{padding:12px}
+  .actions.toolbar{align-items:stretch}.actions.toolbar .searchbox{width:100%;min-width:0}.actions.toolbar .push{margin-left:0;flex:1}
+  .login{padding:26px 22px}.editor{padding:16px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<div class="loginwrap" id="loginWrap">
+  <form class="login" onsubmit="login(event)">
+    <div class="brand" style="padding:0 0 18px"><span class="mark">✳</span>积分商店后台</div>
+    <h1>管理员登录</h1>
+    <p>使用已授予管理员角色的账号登录。后台与商店登录互不影响。</p>
+    <div class="field"><label>管理员邮箱</label><input id="adminEmail" type="email" autocomplete="username" placeholder="name@example.com" required></div>
+    <div class="field"><label>账号密码</label><input id="adminPassword" type="password" autocomplete="current-password" required></div>
+    <button class="btn">登录后台</button>
+    <div class="state" id="loginError" style="margin-top:12px">仅管理员角色可进入；普通账号请返回商店登录。</div>
+    <a href="/" style="display:block;margin-top:16px;color:#647267;text-decoration:none;font-size:13px">← 返回商店</a>
+  </form>
+</div>
+
+<div class="layout hidden" id="app">
+  <aside class="side">
+    <div class="brand"><span class="mark">✳</span>积分商店后台</div>
+    <nav class="nav">
+      <button class="active" onclick="tab('overview',this)">概览</button>
+      <button onclick="tab('goods',this)">商品管理</button>
+      <button onclick="tab('categories',this)">分类管理</button>
+      <button onclick="tab('orders',this)">成交订单</button>
+      <button onclick="tab('site',this)">站点配置</button>
+      <button onclick="tab('plans',this)">充值套餐</button>
+      <button onclick="tab('records',this)">平台记录</button>
+      <button onclick="tab('users',this)">用户管理</button>
+      <button onclick="tab('webhook',this)">通知与 Webhook</button>
+      <button onclick="tab('security',this)">安全设置</button>
+    </nav>
+    <div class="sidefoot">Cloudflare Workers · 一人付<br><span id="sideStatus">加载服务状态中…</span></div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <div><h1 id="pageTitle">概览</h1><p>积分由一人付收款与核销，商品与交付内容由本站在 D1 与 R2 中管理。</p></div>
+      <div class="top-actions"><button class="btn secondary" onclick="loadStatus(this)">刷新状态</button><button class="btn secondary" onclick="logout()">退出</button></div>
+    </header>
+
+    <!-- 概览 -->
+    <section class="view" id="view-overview">
+      <div class="panel">
+        <h2>服务配置状态</h2>
+        <p class="sub">凭证优先使用后台保存的值，未保存时回退到 Worker Secret；接口只返回掩码。</p>
+        <div class="statusgrid">
+          <div class="statusbox"><b id="keyState">—</b><span>YIRENFU_API_KEY</span></div>
+          <div class="statusbox"><b id="dbState">—</b><span>Cloudflare D1</span></div>
+          <div class="statusbox"><b id="hookState">—</b><span>Webhook 签名密钥</span></div>
+          <div class="statusbox"><b id="storageState">—</b><span>R2 文件存储</span></div>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="loadCapabilities()">读取 /capabilities</button>
+          <button class="btn secondary" onclick="loadProduct()">读取 /product</button>
+        </div>
+      </div>
+      <div class="cols">
+        <div class="panel"><h2>能力边界</h2><p class="sub">按平台当前能力显示，不调用未开放交易功能。</p><div id="capabilities" class="state">尚未读取</div></div>
+        <div class="panel"><h2>充值套餐摘要</h2><p class="sub">价格、收费方式和 SKU 均实时来自 /product。</p><div id="product" class="state">尚未读取</div></div>
+      </div>
+    </section>
+
+    <!-- 商品管理 -->
+    <section class="view hidden" id="view-goods">
+      <div class="panel">
+        <h2>上架商品</h2>
+        <p class="sub">用户用积分兑换商品。交付内容支持三种：文本（如卡密、提取码）、链接（如网盘分享链接）、文件（上传到 R2，用户下载需登录且仅本人可下）。</p>
+        <div class="actions toolbar" style="margin:0 0 14px">
+          <input id="goodsQuery" class="searchbox" placeholder="按名称搜索" maxlength="64" onkeydown="if(event.key==='Enter')loadGoods()">
+          <button class="btn secondary" onclick="loadGoods(this)">搜索</button>
+          <button class="btn push" onclick="newGoods()">+ 上架新商品</button>
+        </div>
+
+        <div class="editor hidden" id="goodsEditor">
+          <h2 id="editorTitle" style="margin-bottom:10px">上架新商品</h2>
+          <input type="hidden" id="pId">
+          <div class="cols">
+            <div class="field"><label>商品名称 *</label><input id="pTitle" maxlength="80" placeholder="例如：Pro 模板 · 单套授权"></div>
+            <div class="field"><label>积分价格 *</label><input id="pPrice" type="number" min="1" step="1" placeholder="例如：50"></div>
+          </div>
+          <div class="field"><label>副标题</label><input id="pSummary" maxlength="200" placeholder="一句话说明，显示在商品卡片上"></div>
+          <div class="field"><label>商品详情</label><textarea id="pDesc" rows="3" maxlength="4000" style="resize:vertical"></textarea></div>
+          <div class="cols">
+            <div class="field"><label>封面图地址（可选）</label><input id="pCover" maxlength="500" placeholder="https://… 或 /cover.png"></div>
+            <div class="field"><label>交付方式 *</label>
+              <select id="pType" onchange="syncDeliveryFields()">
+                <option value="TEXT">文本内容</option>
+                <option value="LINK">链接（网盘 / 外部地址）</option>
+                <option value="FILE">文件下载（R2 存储）</option>
+              </select>
+            </div>
+          </div>
+          <div class="cols">
+            <div class="field"><label>所属分类</label><select id="pCategory"><option value="">未分类</option></select></div>
+            <div class="field"><label>商品标签</label><input id="pTags" maxlength="200" placeholder="用逗号分隔，例如：模板, 设计, 热门"><span class="hint">最多 8 个标签，前台商品页可按标签筛选。</span></div>
+          </div>
+
+          <div id="fieldText" class="field">
+            <label>交付文本 *</label>
+            <textarea id="pText" rows="4" maxlength="20000" style="resize:vertical" placeholder="卡密、提取码、账号信息或使用说明。用户兑换后立即可见并可复制。"></textarea>
+          </div>
+
+          <div id="fieldLink" class="field hidden">
+            <label>交付链接 *</label>
+            <input id="pLink" maxlength="2000" placeholder="https://pan.baidu.com/s/xxxx 或 R2 公开域名链接">
+            <span class="hint">支持网盘分享链接、Cloudflare R2 公开域名、或其他外部下载地址。</span>
+          </div>
+
+          <div id="fieldFile" class="hidden">
+            <div class="field">
+              <label>上传文件（最大 50MB）</label>
+              <input id="pFile" type="file" onchange="uploadFile(this)">
+              <span class="hint" id="storageHint">文件上传到 Cloudflare R2，用户通过订单专属链接下载，不公开可枚举。</span>
+            </div>
+            <div class="cols">
+              <div class="field"><label>已上传文件 key</label><input id="pFileKey" maxlength="512" placeholder="上传后自动填入"></div>
+              <div class="field"><label>下载显示名</label><input id="pFileName" maxlength="120" placeholder="例如：模板包.zip"></div>
+            </div>
+          </div>
+
+          <div class="cols3">
+            <div class="field"><label>库存（留空 = 不限）</label><input id="pStock" type="number" min="0" step="1" placeholder="不限"></div>
+            <div class="field"><label>状态</label><select id="pStatus"><option value="ACTIVE">上架</option><option value="HIDDEN">下架</option></select></div>
+            <div class="field"><label>排序（越大越靠前）</label><input id="pSort" type="number" step="1" value="0"></div>
+          </div>
+
+          <div class="actions">
+            <button class="btn" onclick="saveGoods(this)">保存商品</button>
+            <button class="btn secondary" onclick="cancelEdit()">取消</button>
+          </div>
+        </div>
+
+        <div id="goodsOut"><div class="state">正在加载商品…</div></div>
+      </div>
+    </section>
+
+    <!-- 分类管理 -->
+    <section class="view hidden" id="view-categories">
+      <div class="panel">
+        <h2>商品分类</h2>
+        <p class="sub">支持一级分类与二级子分类。前台商品页会按分类树筛选，父分类会包含其所有子分类下的商品。</p>
+        <div class="actions toolbar" style="margin:0 0 14px">
+          <div class="state" style="flex:1;min-width:220px">最多两级；分类下有子分类或商品时不能直接删除，可先调整或下架。</div>
+          <button class="btn push" onclick="newCategory()">+ 新建分类</button>
+        </div>
+        <div class="editor hidden" id="categoryEditor">
+          <h2 id="categoryEditorTitle" style="margin-bottom:10px">新建分类</h2>
+          <input type="hidden" id="cId">
+          <div class="cols">
+            <div class="field"><label>分类名称 *</label><input id="cName" maxlength="40" placeholder="例如：模板资源"></div>
+            <div class="field"><label>父分类</label><select id="cParent"><option value="">顶级分类</option></select><span class="hint">选择父分类后会创建为二级子分类。</span></div>
+          </div>
+          <div class="cols">
+            <div class="field"><label>排序（越大越靠前）</label><input id="cSort" type="number" step="1" value="0"></div>
+            <div class="field"><label>状态</label><select id="cStatus"><option value="ACTIVE">启用</option><option value="HIDDEN">隐藏</option></select></div>
+          </div>
+          <div class="actions">
+            <button class="btn" onclick="saveCategory(this)">保存分类</button>
+            <button class="btn secondary" onclick="cancelCategoryEdit()">取消</button>
+          </div>
+        </div>
+        <div id="categoriesOut"><div class="state">正在加载分类…</div></div>
+      </div>
+    </section>
+
+    <!-- 成交订单 -->
+    <section class="view hidden" id="view-orders">
+      <div class="panel">
+        <h2>成交订单</h2>
+        <p class="sub">积分兑换记录。仅「已交付」的订单会展示交付内容；订单交付内容为快照，修改商品不会影响已购用户。</p>
+        <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadOrders()">刷新订单</button></div>
+        <div id="ordersOut"><div class="state">正在加载订单…</div></div>
+      </div>
+    </section>
+
+    <!-- 站点配置 -->
+    <section class="view hidden" id="view-site">
+      <div class="panel">
+        <h2>站点展示配置</h2>
+        <p class="sub">仅修改商店标题和说明文字；收费方式与积分套餐在一人付控制台配置。</p>
+        <div class="field"><label>站点名称</label><input id="siteName" maxlength="64"></div>
+        <div class="field"><label>副标题 / 服务说明</label><textarea id="description" maxlength="240" rows="3" style="resize:vertical"></textarea></div>
+        <button class="btn" onclick="saveSite(this)">保存站点设置</button>
+      </div>
+    </section>
+
+    <!-- 充值套餐 -->
+    <section class="view hidden" id="view-plans">
+      <div class="panel">
+        <h2>一人付充值套餐</h2>
+        <p class="sub">此处只读联调；积分套餐、价格与收费方式请在一人付项目控制台配置（收费方式需为积分 / 次数包）。</p>
+        <div class="actions" style="margin:0 0 14px">
+          <button class="btn" onclick="loadCapabilities()">只读查询能力</button>
+          <button class="btn secondary" onclick="loadProduct()">只读查询产品</button>
+          <a class="btn secondary" href="https://ai6666.com/opcpay/console/" target="_blank" rel="noopener" style="text-decoration:none">打开一人付控制台 ↗</a>
+        </div>
+        <div id="plansOut" class="data">点击「只读查询产品」。</div>
+      </div>
+    </section>
+
+    <!-- 平台记录 -->
+    <section class="view hidden" id="view-records">
+      <div class="panel">
+        <h2>购买与核销记录</h2>
+        <p class="sub">从平台列表读取记录；购买入口状态不等于支付成功。</p>
+        <div class="actions" style="margin:0 0 12px">
+          <button class="btn" onclick="loadRecords('purchases')">购买入口记录</button>
+          <button class="btn secondary" onclick="loadRecords('consumptions')">正式核销记录</button>
+          <button class="btn secondary" onclick="loadRecords('events')">通知投递记录</button>
+        </div>
+        <pre class="data" id="recordsOut">尚未查询</pre>
+      </div>
+    </section>
+
+    <!-- 用户管理 -->
+    <section class="view hidden" id="view-users">
+      <div class="panel">
+        <h2>用户管理</h2>
+        <p class="sub">前台注册的邮箱账号。管理员是账号上的独立角色，与后台会话绑定；密码只以 PBKDF2 哈希存储，后台不可查看，只能重置。变更角色、停用或重置密码会立即让该用户所有会话失效。</p>
+        <div class="actions" style="margin:0 0 12px">
+          <input id="userQuery" class="searchbox" placeholder="按邮箱搜索" maxlength="64" onkeydown="if(event.key==='Enter')loadUsers(0)">
+          <button class="btn" onclick="loadUsers(0)">搜索</button>
+          <button class="btn secondary" onclick="$('#userQuery').value='';loadUsers(0)">重置</button>
+        </div>
+        <div class="state" id="usersMeta" style="margin-bottom:10px">尚未加载</div>
+        <div id="usersOut"></div>
+      </div>
+    </section>
+
+    <!-- 通知 -->
+    <section class="view hidden" id="view-webhook">
+      <div class="panel">
+        <h2>权益通知配置</h2>
+        <p class="sub">接收地址固定为当前 Worker 域名下的 /api/webhook；停用会暂停平台投递。</p>
+        <div class="state" id="webhookState">尚未读取</div>
+        <div class="actions" style="margin-top:12px">
+          <button class="btn" onclick="saveWebhook(true)">启用通知</button>
+          <button class="btn secondary" onclick="saveWebhook(false)">停用通知</button>
+          <button class="btn secondary" onclick="loadWebhook()">读取状态</button>
+          <button class="btn warn" onclick="rotateWebhook()">轮换签名密钥</button>
+        </div>
+        <div id="secretBox" class="secret hidden" style="margin-top:14px"></div>
+        <div class="panel" style="margin:16px 0 0;background:#fbfcfa">
+          <h2>部署接收端密钥</h2>
+          <p class="sub" style="margin-bottom:0">首次保存通知或轮换密钥时平台仅返回一次。请复制并运行：<code>npx wrangler secret put YIRENFU_WEBHOOK_SECRET</code>。不要将密钥写入代码仓库。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 安全 -->
+    <section class="view hidden" id="view-security">
+      <div class="panel">
+        <h2>一人付 API Key</h2>
+        <p class="sub">保存后立即生效并优先于 Worker Secret。接口只返回掩码。</p>
+        <div class="field"><label>新的 API Key</label><input id="apiKeyInput" type="password" autocomplete="off" placeholder="留空则不修改"></div>
+        <div class="actions" style="margin-top:0">
+          <button class="btn" onclick="saveApiKey()">保存 API Key</button>
+          <button class="btn secondary" onclick="clearSecret('api-key')">清除并回退 Worker Secret</button>
+          <button class="btn secondary" onclick="loadCapabilities()">测试读取 /capabilities</button>
+        </div>
+        <div class="state" id="apiKeyState" style="margin-top:12px">—</div>
+      </div>
+      <div class="panel">
+        <h2>Webhook 签名密钥</h2>
+        <p class="sub">用于校验一人付通知签名，保存后无需再执行 wrangler secret put。</p>
+        <div class="field"><label>新的签名密钥</label><input id="hookInput" type="password" autocomplete="off" placeholder="留空则不修改"></div>
+        <div class="actions" style="margin-top:0">
+          <button class="btn" onclick="saveHookSecret()">保存签名密钥</button>
+          <button class="btn secondary" onclick="clearSecret('webhook-secret')">清除并回退 Worker Secret</button>
+        </div>
+        <div class="state" id="hookStateBox" style="margin-top:12px">—</div>
+      </div>
+      <div class="panel">
+        <h2>操作审计</h2>
+        <p class="sub">记录管理员敏感操作，最多显示最近 30 条。</p>
+        <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadAudit()">刷新</button></div>
+        <pre class="data" id="auditOut">尚未加载</pre>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 3200); }
+async function withBusy(button, task) {
+  if (!button) return task();
+  if (button.disabled) return;
+  const wasDisabled = button.disabled;
+  button.disabled = true;
+  button.classList.add('is-loading');
+  button.setAttribute('aria-busy', 'true');
+  try { return await task(); }
+  finally {
+    button.disabled = wasDisabled;
+    button.classList.remove('is-loading');
+    button.removeAttribute('aria-busy');
+  }
+}
+async function api(path, o = {}) {
+  const r = await fetch(path, { ...o, headers: { 'content-type': 'application/json', ...(o.headers || {}) } });
+  let d = {}; try { d = await r.json(); } catch {}
+  if (!r.ok) throw Object.assign(new Error(d.error || '请求失败'), { data: d, status: r.status });
+  return d;
+}
+function fmt(v) { if (!v) return '—'; const d = new Date(v); return isNaN(d.getTime()) ? v : d.toLocaleString('zh-CN', { hour12: false }); }
+let active = 'overview', GOODS = {}, ORDERS = [], CATEGORIES = [], STORAGE = false;
+
+async function login(e) {
+  e.preventDefault();
+  return withBusy(e.submitter, async () => {
+    $('#loginError').classList.remove('bad');
+    try {
+      await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ email: $('#adminEmail').value, password: $('#adminPassword').value }) });
+      $('#adminPassword').value = '';
+      $('#loginWrap').classList.add('hidden'); $('#app').classList.remove('hidden');
+      await loadStatus(); await loadSite(); await loadCategories(); await loadGoods();
+    } catch (err) { $('#loginError').classList.add('bad'); $('#loginError').textContent = err.message; }
+  });
+}
+async function boot() {
+  try {
+    const x = await api('/api/admin/me');
+    if (x.authenticated && x.user.role === 'admin') {
+      $('#loginWrap').classList.add('hidden'); $('#app').classList.remove('hidden');
+      await loadStatus(); await loadSite(); await loadCategories(); await loadGoods();
+    }
+  } catch {}
+}
+async function logout() { await api('/api/admin/logout', { method: 'POST', body: '{}' }).catch(() => {}); location.reload(); }
+function tab(name, el) {
+  active = name;
+  document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+  $('#view-' + name).classList.remove('hidden');
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  $('#pageTitle').textContent = el.textContent.trim();
+  if (name === 'users') loadUsers(0);
+  if (name === 'orders') loadOrders();
+  if (name === 'goods') { loadCategories(); loadGoods(); }
+  if (name === 'categories') loadCategories();
+  if (name === 'security') { loadSecurity(); loadAudit(); }
+}
+
+/* ---------- 状态 ---------- */
+async function loadStatus(button) {
+  return withBusy(button, async () => {
+  try {
+    const s = await api('/api/admin/status');
+    STORAGE = !!s.storageConfigured;
+    $('#keyState').textContent = s.apiKeyConfigured ? '已配置' : '待配置';
+    $('#dbState').textContent = s.databaseConfigured ? '已连接' : '未连接';
+    $('#hookState').textContent = s.webhookSecretConfigured ? '已配置' : '待配置';
+    $('#storageState').textContent = STORAGE ? '已绑定 R2' : '未绑定';
+    $('#sideStatus').textContent = s.apiKeyConfigured ? '支付凭证就绪' : '缺少支付凭证';
+    $('#storageHint').textContent = STORAGE
+      ? '文件上传到 Cloudflare R2，用户通过订单专属链接下载，不公开可枚举。'
+      : '尚未绑定 R2：请在 wrangler.toml 增加 r2_buckets 绑定后重新部署；也可改用「链接」方式填网盘地址。';
+  } catch (e) { toast(e.message); }
+  });
+}
+async function loadSite() {
+  try { const c = await api('/api/admin/config'); $('#siteName').value = c.siteName; $('#description').value = c.description; } catch (e) { toast(e.message); }
+}
+async function saveSite(button) {
+  return withBusy(button, async () => {
+    try { await api('/api/admin/config', { method: 'PUT', body: JSON.stringify({ siteName: $('#siteName').value, description: $('#description').value }) }); toast('站点展示配置已保存'); } catch (e) { toast(e.message); }
+  });
+}
+function pretty(node, data) { node.textContent = JSON.stringify(data, null, 2); }
+async function loadCapabilities() {
+  try { const d = await api('/api/admin/capabilities'); pretty($('#capabilities'), d); pretty($('#plansOut'), d); toast('已只读读取 /capabilities'); }
+  catch (e) { pretty($('#capabilities'), e.data || { error: e.message }); toast(e.message); }
+}
+async function loadProduct() {
+  try { const d = await api('/api/admin/product'); pretty($('#product'), d); pretty($('#plansOut'), d); toast('已只读读取 /product'); }
+  catch (e) { pretty($('#product'), e.data || { error: e.message }); pretty($('#plansOut'), e.data || { error: e.message }); toast(e.message); }
+}
+async function loadRecords(type) {
+  try { pretty($('#recordsOut'), await api('/api/admin/' + type)); } catch (e) { pretty($('#recordsOut'), e.data || { error: e.message }); toast(e.message); }
+}
+
+/* ---------- 分类管理 ---------- */
+function categoryMap() { return new Map(CATEGORIES.map(c => [c.id, c])); }
+function categoryName(id) { return categoryMap().get(id)?.name || '未分类'; }
+function orderedCategories() {
+  const tops = CATEGORIES.filter(c => !c.parent_id);
+  const rows = [];
+  for (const top of tops) {
+    rows.push({ ...top, depth: 0 });
+    for (const child of CATEGORIES.filter(c => c.parent_id === top.id)) rows.push({ ...child, depth: 1 });
+  }
+  return rows;
+}
+function renderCategoryOptions() {
+  const tops = CATEGORIES.filter(c => !c.parent_id);
+  const productSelect = $('#pCategory');
+  if (productSelect) {
+    const current = productSelect.value;
+    productSelect.innerHTML = '<option value="">未分类</option>' + tops.map(top =>
+      `<option value="${esc(top.id)}">${esc(top.name)}</option>` +
+      CATEGORIES.filter(c => c.parent_id === top.id).map(child => `<option value="${esc(child.id)}">　└ ${esc(child.name)}</option>`).join('')
+    ).join('');
+    productSelect.value = current;
+  }
+  const parentSelect = $('#cParent');
+  if (parentSelect) {
+    const current = parentSelect.value;
+    const selfId = $('#cId')?.value || '';
+    parentSelect.innerHTML = '<option value="">顶级分类</option>' + tops.filter(top => top.id !== selfId)
+      .map(top => `<option value="${esc(top.id)}">${esc(top.name)}</option>`).join('');
+    parentSelect.value = current;
+  }
+}
+function renderCategories() {
+  const rows = orderedCategories();
+  if (!rows.length) {
+    $('#categoriesOut').innerHTML = '<div class="state">还没有分类。先新建一级分类，再为它添加子分类。</div>';
+    return;
+  }
+  $('#categoriesOut').innerHTML = `<table><thead><tr><th>分类</th><th>商品数</th><th>状态</th><th>排序</th><th>操作</th></tr></thead><tbody>${rows.map(c => `<tr>
+    <td><div class="cat-name ${c.depth ? 'child' : ''}">${esc(c.name)}</div></td>
+    <td>${Number(c.product_count || 0)}</td>
+    <td>${c.status === 'ACTIVE' ? '<span class="pill ok">启用</span>' : '<span class="pill off">隐藏</span>'}</td>
+    <td>${Number(c.sort_order || 0)}</td>
+    <td>
+      <button class="rowbtn" onclick="editCategory('${c.id}')">编辑</button>
+      <button class="rowbtn" onclick="newCategory('${c.id}')">添加子分类</button>
+      <button class="rowbtn danger" onclick="deleteCategory('${c.id}')">删除</button>
+    </td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function loadCategories(button) {
+  return withBusy(button, async () => {
+    try {
+      const d = await api('/api/admin/categories');
+      CATEGORIES = d.items || [];
+      renderCategoryOptions();
+      renderCategories();
+    } catch (e) { $('#categoriesOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
+  });
+}
+function newCategory(parentId = '') {
+  $('#categoryEditorTitle').textContent = '新建分类';
+  $('#cId').value = ''; $('#cName').value = ''; $('#cSort').value = '0'; $('#cStatus').value = 'ACTIVE';
+  renderCategoryOptions();
+  $('#cParent').value = parentId || '';
+  $('#categoryEditor').classList.remove('hidden');
+  $('#categoryEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('#cName').focus({ preventScroll: true });
+}
+function editCategory(id) {
+  const c = CATEGORIES.find(x => x.id === id); if (!c) return;
+  $('#categoryEditorTitle').textContent = '编辑分类 · ' + c.name;
+  $('#cId').value = c.id; $('#cName').value = c.name || ''; $('#cSort').value = c.sort_order ?? 0; $('#cStatus').value = c.status || 'ACTIVE';
+  renderCategoryOptions();
+  $('#cParent').value = c.parent_id || '';
+  $('#categoryEditor').classList.remove('hidden');
+  $('#categoryEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function cancelCategoryEdit() { $('#categoryEditor').classList.add('hidden'); }
+async function saveCategory(button) {
+  return withBusy(button, async () => {
+    const id = $('#cId').value;
+    const payload = { name: $('#cName').value, parent_id: $('#cParent').value || null, sort_order: Number($('#cSort').value || 0), status: $('#cStatus').value };
+    try {
+      if (id) await api('/api/admin/categories/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+      else await api('/api/admin/categories', { method: 'POST', body: JSON.stringify(payload) });
+      toast(id ? '分类已更新' : '分类已创建');
+      cancelCategoryEdit();
+      await loadCategories();
+      await loadGoods();
+    } catch (e) { toast(e.message); }
+  });
+}
+async function deleteCategory(id) {
+  const c = CATEGORIES.find(x => x.id === id); if (!c) return;
+  if (!confirm('删除分类「' + c.name + '」？分类下有子分类或商品时不能删除。')) return;
+  try {
+    await api('/api/admin/categories/' + encodeURIComponent(id), { method: 'DELETE' });
+    toast('分类已删除');
+    await loadCategories();
+    await loadGoods();
+  } catch (e) { toast(e.message); }
+}
+
+/* ---------- 商品管理 ---------- */
+async function loadGoods(button) {
+  return withBusy(button, async () => {
+  const q = ($('#goodsQuery') || {}).value || '';
+  try {
+    const d = await api('/api/admin/products?q=' + encodeURIComponent(q.trim()));
+    GOODS = {}; (d.items || []).forEach(p => GOODS[p.id] = p);
+    renderGoods(d.items || []);
+  } catch (e) { $('#goodsOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
+  });
+}
+function renderGoods(items) {
+  if (!items.length) {
+    $('#goodsOut').innerHTML = '<div class="state">还没有商品。点击「+ 上架新商品」添加第一件，交付方式可选文本 / 链接 / 文件。</div>';
+    return;
+  }
+  $('#goodsOut').innerHTML = `<table><thead><tr>
+      <th>商品</th><th>积分价</th><th>交付</th><th>库存</th><th>已售</th><th>状态</th><th>操作</th>
+    </tr></thead><tbody>${items.map(p => {
+      const typeLabel = { TEXT: '文本', LINK: '链接', FILE: '文件' }[p.delivery_type] || p.delivery_type;
+      const stock = (p.stock === null || p.stock === undefined) ? '不限' : String(p.stock);
+      const thumb = p.cover_url ? `<img class="thumb" src="${esc(p.cover_url)}" alt="">` : `<div class="thumb"></div>`;
+      const tags = Array.isArray(p.tags) ? p.tags : [];
+      return `<tr>
+        <td><div style="display:flex;gap:10px;align-items:center">${thumb}<div><b>${esc(p.title)}</b><div class="mono">${esc(categoryName(p.category_id))}${p.summary ? ' · ' + esc(p.summary) : ''}</div>${tags.length ? `<div class="cat-tags">${tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div></div></td>
+        <td><b>${Number(p.price_points)}</b></td>
+        <td>${esc(typeLabel)}</td>
+        <td>${esc(stock)}</td>
+        <td>${Number(p.sold_count || 0)}</td>
+        <td>${p.status === 'ACTIVE' ? '<span class="pill ok">上架</span>' : '<span class="pill off">下架</span>'}</td>
+        <td>
+          <button class="rowbtn" onclick="editGoods('${p.id}')">编辑</button>
+          <button class="rowbtn" onclick="toggleGoods('${p.id}')">${p.status === 'ACTIVE' ? '下架' : '上架'}</button>
+          <button class="rowbtn danger" onclick="deleteGoods('${p.id}')">删除</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+function syncDeliveryFields() {
+  const t = $('#pType').value;
+  $('#fieldText').classList.toggle('hidden', t !== 'TEXT');
+  $('#fieldLink').classList.toggle('hidden', t !== 'LINK');
+  $('#fieldFile').classList.toggle('hidden', t !== 'FILE');
+}
+function newGoods() {
+  $('#editorTitle').textContent = '上架新商品';
+  ['pId', 'pTitle', 'pSummary', 'pDesc', 'pCover', 'pText', 'pLink', 'pFileKey', 'pFileName', 'pStock', 'pTags'].forEach(k => $('#' + k).value = '');
+  $('#pPrice').value = ''; $('#pSort').value = '0'; $('#pType').value = 'TEXT'; $('#pStatus').value = 'ACTIVE';
+  renderCategoryOptions(); $('#pCategory').value = '';
+  $('#pFile').value = '';
+  syncDeliveryFields();
+  $('#goodsEditor').classList.remove('hidden');
+  $('#goodsEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function editGoods(id) {
+  const p = GOODS[id]; if (!p) return;
+  $('#editorTitle').textContent = '编辑商品 · ' + p.title;
+  $('#pId').value = p.id;
+  $('#pTitle').value = p.title || '';
+  $('#pSummary').value = p.summary || '';
+  $('#pDesc').value = p.description || '';
+  $('#pPrice').value = p.price_points ?? '';
+  $('#pCover').value = p.cover_url || '';
+  renderCategoryOptions(); $('#pCategory').value = p.category_id || '';
+  $('#pTags').value = Array.isArray(p.tags) ? p.tags.join(', ') : '';
+  $('#pType').value = p.delivery_type || 'TEXT';
+  $('#pText').value = p.delivery_text || '';
+  $('#pLink').value = p.delivery_url || '';
+  $('#pFileKey').value = p.file_key || '';
+  $('#pFileName').value = p.file_name || '';
+  $('#pStock').value = (p.stock === null || p.stock === undefined) ? '' : p.stock;
+  $('#pStatus').value = p.status || 'ACTIVE';
+  $('#pSort').value = p.sort_order ?? 0;
+  syncDeliveryFields();
+  $('#goodsEditor').classList.remove('hidden');
+  $('#goodsEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function cancelEdit() { $('#goodsEditor').classList.add('hidden'); }
+async function uploadFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!STORAGE) { toast('未绑定 R2 存储，无法上传；可改用「链接」方式'); input.value = ''; return; }
+  if (file.size > 50 * 1024 * 1024) { toast('文件不能超过 50MB'); input.value = ''; return; }
+  const fd = new FormData(); fd.append('file', file);
+  toast('正在上传…');
+  try {
+    const r = await fetch('/api/admin/upload', { method: 'POST', body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || '上传失败');
+    $('#pFileKey').value = d.key;
+    if (!$('#pFileName').value) $('#pFileName').value = d.name || '';
+    toast(`上传成功（${Math.round(d.size / 1024)} KB）`);
+  } catch (e) { toast(e.message); input.value = ''; }
+}
+async function saveGoods(button) {
+  return withBusy(button, async () => {
+  const payload = {
+    title: $('#pTitle').value,
+    summary: $('#pSummary').value,
+    description: $('#pDesc').value,
+    price_points: Number($('#pPrice').value),
+    cover_url: $('#pCover').value,
+    category_id: $('#pCategory').value || null,
+    tags: $('#pTags').value,
+    delivery_type: $('#pType').value,
+    delivery_text: $('#pText').value,
+    delivery_url: $('#pLink').value,
+    file_key: $('#pFileKey').value,
+    file_name: $('#pFileName').value,
+    stock: $('#pStock').value === '' ? null : Number($('#pStock').value),
+    status: $('#pStatus').value,
+    sort_order: Number($('#pSort').value || 0),
+  };
+  const id = $('#pId').value;
+  try {
+    if (id) await api('/api/admin/products/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+    else await api('/api/admin/products', { method: 'POST', body: JSON.stringify(payload) });
+    toast(id ? '商品已更新' : '商品已上架');
+    cancelEdit(); await loadCategories(); await loadGoods();
+  } catch (e) { toast(e.message); }
+  });
+}
+async function toggleGoods(id) {
+  const p = GOODS[id]; if (!p) return;
+  const next = p.status === 'ACTIVE' ? 'HIDDEN' : 'ACTIVE';
+  try {
+    await api('/api/admin/products/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify({ ...p, status: next })
+    });
+    toast(next === 'ACTIVE' ? '已上架' : '已下架'); await loadGoods();
+  } catch (e) { toast(e.message); }
+}
+async function deleteGoods(id) {
+  const p = GOODS[id]; if (!p) return;
+  if (!confirm('删除商品「' + p.title + '」？已成交的订单会保留交付内容，商品将改为下架。')) return;
+  try { const d = await api('/api/admin/products/' + encodeURIComponent(id), { method: 'DELETE' }); toast(d.message || '已删除'); await loadGoods(); } catch (e) { toast(e.message); }
+}
+
+/* ---------- 订单 ---------- */
+async function loadOrders() {
+  try {
+    const d = await api('/api/admin/orders?limit=50');
+    ORDERS = d.items || [];
+    if (!ORDERS.length) { $('#ordersOut').innerHTML = '<div class="state">还没有成交订单。</div>'; return; }
+    $('#ordersOut').innerHTML = `<table><thead><tr>
+      <th>订单号</th><th>商品</th><th>用户</th><th>积分</th><th>状态</th><th>时间</th>
+    </tr></thead><tbody>${ORDERS.map(o => `<tr>
+      <td class="mono">${esc(o.order_no)}</td>
+      <td>${esc(o.title)}</td>
+      <td class="mono">${esc(o.email || o.user_id)}</td>
+      <td><b>${Number(o.price_points)}</b></td>
+      <td>${o.status === 'DELIVERED' ? '<span class="pill ok">已交付</span>' : o.status === 'PENDING' ? '<span class="pill wait">待确认</span>' : '<span class="pill bad">失败</span>'}</td>
+      <td>${esc(fmt(o.created_at))}</td>
+    </tr>`).join('')}</tbody></table>`;
+  } catch (e) { $('#ordersOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
+}
+
+/* ---------- 用户 ---------- */
+let USERS = {}, userOffset = 0;
+async function loadUsers(offset) {
+  if (typeof offset === 'number') userOffset = offset;
+  const q = $('#userQuery').value.trim();
+  try { renderUsers(await api('/api/admin/users?limit=20&offset=' + userOffset + '&q=' + encodeURIComponent(q))); }
+  catch (e) { $('#usersMeta').textContent = e.message; toast(e.message); }
+}
+function renderUsers(d) {
+  USERS = {}; d.items.forEach(u => USERS[u.id] = u);
+  $('#usersMeta').textContent = `共 ${d.total} 个账号 · 当前显示 ${d.items.length} 个`;
+  if (!d.items.length) { $('#usersOut').innerHTML = '<div class="state">没有匹配的账号</div>'; return; }
+  $('#usersOut').innerHTML = `<table><thead><tr><th>邮箱 / ID</th><th>身份</th><th>状态</th><th>会话</th><th>充值单</th><th>已购</th><th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${d.items.map(u => `<tr>
+    <td><b>${esc(u.email)}</b><div class="mono">${esc(u.id)}</div></td>
+    <td>${u.role === 'admin' ? '<span class="pill ok">管理员</span>' : '<span class="pill off">普通用户</span>'}</td>
+    <td>${u.disabled ? '<span class="pill off">已停用</span>' : '<span class="pill ok">正常</span>'}</td>
+    <td>${u.sessions}</td><td>${u.purchases}</td><td>${u.orders}</td>
+    <td>${esc(fmt(u.created_at))}</td><td>${esc(fmt(u.last_login_at))}</td>
+    <td><button class="rowbtn" onclick="toggleUserRole('${u.id}','${u.role || 'user'}')">${u.role === 'admin' ? '取消管理员' : '设为管理员'}</button>
+      <button class="rowbtn" onclick="resetPassword('${u.id}')">重置密码</button>
+      <button class="rowbtn" onclick="toggleUser('${u.id}',${u.disabled ? 0 : 1})">${u.disabled ? '启用' : '停用'}</button>
+      <button class="rowbtn danger" onclick="deleteUser('${u.id}')">删除</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function toggleUserRole(id, role) {
+  const u = USERS[id]; if (!u) return;
+  const next = role === 'admin' ? 'user' : 'admin';
+  const label = next === 'admin' ? '设为管理员' : '取消管理员权限';
+  if (!confirm(`${label}：${u.email}？\n角色变更后该账号现有登录会话会全部失效。`)) return;
+  try {
+    await api('/api/admin/users/' + encodeURIComponent(id) + '/role', { method: 'POST', body: JSON.stringify({ role: next }) });
+    toast(next === 'admin' ? '已设为管理员' : '已取消管理员权限');
+    loadUsers();
+  } catch (e) { toast(e.message); }
+}
+async function resetPassword(id) {
+  const u = USERS[id]; if (!u) return;
+  const pw = prompt('为 ' + u.email + ' 设置新密码（至少 10 位）：'); if (!pw) return;
+  try { const d = await api('/api/admin/users/' + encodeURIComponent(id) + '/reset-password', { method: 'POST', body: JSON.stringify({ password: pw }) }); toast(d.message || '密码已重置'); loadUsers(); } catch (e) { toast(e.message); }
+}
+async function toggleUser(id, disabled) {
+  const u = USERS[id]; if (!u) return;
+  if (!confirm((disabled ? '停用' : '启用') + '账号 ' + u.email + '？' + (disabled ? '\n该用户所有会话会立即失效。' : ''))) return;
+  try { await api('/api/admin/users/' + encodeURIComponent(id) + '/status', { method: 'POST', body: JSON.stringify({ disabled: !!disabled }) }); toast(disabled ? '账号已停用' : '账号已启用'); loadUsers(); } catch (e) { toast(e.message); }
+}
+async function deleteUser(id) {
+  const u = USERS[id]; if (!u) return;
+  if (!confirm('删除账号 ' + u.email + ' 及其充值 / 订单记录？此操作不可撤销。')) return;
+  if (!confirm('再次确认删除 ' + u.email + ' ？')) return;
+  try { await api('/api/admin/users/' + encodeURIComponent(id), { method: 'DELETE' }); toast('账号已删除'); loadUsers(); } catch (e) { toast(e.message); }
+}
+
+/* ---------- 通知 / 安全 ---------- */
+async function loadWebhook() { try { pretty($('#webhookState'), await api('/api/admin/webhook')); } catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); } }
+async function saveWebhook(enabled) {
+  try { const d = await api('/api/admin/webhook', { method: 'PUT', body: JSON.stringify({ enabled }) }); pretty($('#webhookState'), d); if (d.secret) showSecret(d.secret); toast(enabled ? '通知已启用' : '通知已停用'); }
+  catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); }
+}
+async function rotateWebhook() {
+  if (!confirm('轮换会立即使新签名密钥生效。请确认准备更新 Worker Secret。')) return;
+  try { const d = await api('/api/admin/webhook/rotate', { method: 'POST', body: '{}' }); showSecret(d.secret); toast('签名密钥已轮换，仅显示本次'); } catch (e) { toast(e.message); }
+}
+function showSecret(secret) { const box = $('#secretBox'); box.classList.remove('hidden'); box.textContent = '仅本次可见的新密钥（请立即保存为 Cloudflare Secret YIRENFU_WEBHOOK_SECRET）： ' + secret; }
+function srcLabel(t) { return ({ database: '后台保存', secret: 'Worker Secret', none: '未配置' })[t] || t; }
+function renderSecurity(s) {
+  $('#apiKeyState').textContent = '当前 API Key：' + (s.apiKeyMasked ? s.apiKeyMasked + ' · ' + srcLabel(s.apiKeySource) : '未配置');
+  $('#hookStateBox').textContent = '当前签名密钥：' + (s.webhookSecretMasked ? s.webhookSecretMasked + ' · ' + srcLabel(s.webhookSecretSource) : '未配置');
+}
+async function loadSecurity() { try { renderSecurity(await api('/api/admin/security')); } catch (e) { toast(e.message); } }
+async function saveApiKey() {
+  const v = $('#apiKeyInput').value.trim(); if (!v) return toast('请输入 API Key');
+  try { renderSecurity(await api('/api/admin/api-key', { method: 'POST', body: JSON.stringify({ value: v }) })); $('#apiKeyInput').value = ''; toast('API Key 已保存并生效'); loadStatus(); } catch (e) { toast(e.message); }
+}
+async function saveHookSecret() {
+  const v = $('#hookInput').value.trim(); if (!v) return toast('请输入签名密钥');
+  try { renderSecurity(await api('/api/admin/webhook-secret', { method: 'POST', body: JSON.stringify({ value: v }) })); $('#hookInput').value = ''; toast('签名密钥已保存并生效'); loadStatus(); } catch (e) { toast(e.message); }
+}
+async function clearSecret(kind) {
+  if (!confirm('清除后台保存的值并回退到 Worker Secret？')) return;
+  try { renderSecurity(await api('/api/admin/' + kind, { method: 'POST', body: JSON.stringify({ clear: true }) })); toast('已清除，回退 Worker Secret'); loadStatus(); } catch (e) { toast(e.message); }
+}
+async function loadAudit() {
+  try { const d = await api('/api/admin/audit?limit=30'); $('#auditOut').textContent = d.items.length ? d.items.map(i => `${fmt(i.created_at)}  ${i.action}${i.target ? '  ' + i.target : ''}${i.detail ? '  ' + i.detail : ''}`).join('\n') : '暂无记录'; }
+  catch (e) { $('#auditOut').textContent = e.message; }
+}
+boot();
+</script>
+</body>
+</html>

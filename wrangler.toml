@@ -1,0 +1,32 @@
+name = "onepay-shop-worker"
+main = "src/index.js"
+compatibility_date = "2026-05-03"
+workers_dev = true
+
+routes = [
+  { pattern = "shop.sunsetzhong.indevs.in", custom_domain = true }
+]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "onepay-shop"
+database_id = "930bf844-3ea5-4817-9875-bc727846a973"
+migrations_dir = "migrations"
+
+# 商品文件交付：文件上传至 R2，用户凭订单归属下载。
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "onepay-shop-files"
+
+[vars]
+SITE_NAME = "云端积分商店"
+SITE_DESCRIPTION = "支付宝安全充值积分 · 积分兑换数字商品"
+COOKIE_NAME = "onepay_session"
+ADMIN_COOKIE_NAME = "onepay_admin_session"
+SESSION_DAYS = "14"

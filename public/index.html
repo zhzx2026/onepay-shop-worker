@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f5f7f4">
+<title>云端积分商店</title>
+<link rel="stylesheet" href="/storefront.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="container">
+    <a class="brand" href="/"><span class="brand-mark">✳</span><span data-site-name>云端积分商店</span></a>
+    <nav class="nav-links" aria-label="主导航">
+      <a class="nav-link" data-nav="home" href="/">首页</a>
+      <a class="nav-link" data-nav="shop" href="/shop">全部商品</a>
+      <a class="nav-link" data-nav="account" href="/account">个人中心</a>
+    </nav>
+    <div class="header-side">
+      <span class="points-chip hidden" data-points-wrap><b data-points>0</b><span>积分</span></span>
+      <a class="account-link" href="/account"><span class="account-dot" data-account-dot>→</span><span data-account-label>登录 / 注册</span></a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="container home-hero">
+    <div>
+      <div class="eyebrow">POINTS · CURATED · DELIVERY</div>
+      <h1 class="display">数字内容，<br>按需获取。</h1>
+      <p class="lead">用积分兑换精选数字商品。分类清楚、交付即时，购买记录长期保存在个人账户里。</p>
+      <div class="actions" style="margin-top:27px">
+        <a class="sbtn primary" href="/shop">浏览全部商品</a>
+        <a class="sbtn" href="/account">进入个人中心</a>
+      </div>
+      <div class="hero-proof">
+        <div class="proof-item"><b>积分兑换</b>统一账户余额</div>
+        <div class="proof-item"><b>即时交付</b>文本 / 链接 / 文件</div>
+        <div class="proof-item"><b>长期保存</b>已购内容随时查看</div>
+      </div>
+    </div>
+    <div class="hero-visual" aria-hidden="true">
+      <div class="hero-panel">
+        <div class="hero-panel-inner">
+          <div class="hero-panel-label">YOUR CONTENT LIBRARY</div>
+          <h3>一个账户，管理积分与已购内容。</h3>
+          <p>充值、兑换、下载，都在个人中心完成。</p>
+          <div class="flow">
+            <div class="flow-row"><span>账户余额</span><b>积分实时核验</b></div>
+            <div class="flow-row"><span>商品分类</span><b>快速定位内容</b></div>
+            <div class="flow-row"><span>已购内容</span><b>永久保存</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="floating-note"><b>交付即时可见</b>兑换成功后立即展示内容，并同步到「我的已购」。</div>
+    </div>
+  </section>
+
+  <section class="container section" id="categories">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">EXPLORE BY CATEGORY</div>
+        <h2>按分类浏览</h2>
+        <p>从分类进入商品页，再按子分类与标签进一步筛选。</p>
+      </div>
+      <a class="sbtn sm" href="/shop">全部商品 →</a>
+    </div>
+    <div class="category-grid" id="homeCategories"><div class="empty-state">正在读取分类…</div></div>
+  </section>
+
+  <section class="container section">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">HOW IT WORKS</div>
+        <h2>三步完成兑换</h2>
+      </div>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="step-num">01 / ACCOUNT</div><h3>登录个人中心</h3><p>在账户设置里查看积分余额，并按需充值。</p></div>
+      <div class="step"><div class="step-num">02 / DISCOVER</div><h3>筛选需要的商品</h3><p>在独立商品页按分类、子分类和标签快速筛选。</p></div>
+      <div class="step"><div class="step-num">03 / DELIVERY</div><h3>兑换并立即查看</h3><p>兑换成功后内容即时展示，同时永久保存在已购列表。</p></div>
+    </div>
+  </section>
+
+  <section class="container section">
+    <div class="cta-band">
+      <div>
+        <h2>从商品目录开始</h2>
+        <p>分类与标签筛选已经准备好，找到合适的内容只需要几步。</p>
+      </div>
+      <a class="sbtn primary" href="/shop">打开商品页</a>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span>
+    <span>积分兑换 · 即时交付 · 长期保存</span>
+  </div>
+</footer>
+
+<script src="/storefront.js"></script>
+<script>
+const { $, esc, api, initChrome } = Store;
+(async () => {
+  $('#year').textContent = new Date().getFullYear();
+  await initChrome('home');
+  const grid = $('#homeCategories');
+  try {
+    const data = await api('/api/categories');
+    const items = data.items || [];
+    const tops = items.filter(item => !item.parent_id);
+    if (!tops.length) {
+      grid.innerHTML = '<div class="empty-state"><b>分类正在整理中</b>可以直接进入商品页查看全部内容。<a href="/shop">去商品页 →</a></div>';
+      return;
+    }
+    grid.innerHTML = tops.slice(0, 8).map(item => {
+      const children = items.filter(child => child.parent_id === item.id);
+      const detail = children.length ? children.slice(0, 3).map(child => child.name).join(' · ') : '查看该分类下的全部商品';
+      return `<a class="category-card" href="/shop?category=${encodeURIComponent(item.id)}">
+        <span class="category-icon">${esc(item.name.slice(0, 1))}</span>
+        <div><h3>${esc(item.name)}</h3><p>${esc(detail)}</p><div class="category-meta">${children.length ? children.length + ' 个子分类 · ' : ''}${Number(item.product_count || 0)} 件商品</div></div>
+      </a>`;
+    }).join('');
+  } catch (error) {
+    grid.innerHTML = `<div class="empty-state"><b>暂时无法读取分类</b>${esc(error.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>

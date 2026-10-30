@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f5f7f4">
+<title>个人中心 · 云端积分商店</title>
+<link rel="stylesheet" href="/storefront.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="container">
+    <a class="brand" href="/"><span class="brand-mark">✳</span><span data-site-name>云端积分商店</span></a>
+    <nav class="nav-links" aria-label="主导航">
+      <a class="nav-link" data-nav="home" href="/">首页</a>
+      <a class="nav-link" data-nav="shop" href="/shop">全部商品</a>
+      <a class="nav-link" data-nav="account" href="/account">个人中心</a>
+    </nav>
+    <div class="header-side">
+      <span class="points-chip hidden" data-points-wrap><b data-points>0</b><span>积分</span></span>
+      <a class="account-link" href="/account"><span class="account-dot" data-account-dot>→</span><span data-account-label>个人中心</span></a>
+    </div>
+  </div>
+</header>
+
+<main class="container account-wrap">
+  <div id="accountLoading" class="empty-state">正在读取账户信息…</div>
+
+  <section id="authView" class="auth-layout hidden">
+    <div class="auth-aside">
+      <div>
+        <div class="eyebrow" style="color:#a9d6bc">MEMBER ACCOUNT</div>
+        <h1>你的积分与已购内容，都在这里。</h1>
+        <p>登录后可以充值积分、兑换商品，并随时回来查看已购内容。</p>
+      </div>
+      <div class="auth-features">
+        <div class="auth-feature">积分余额实时核验</div>
+        <div class="auth-feature">充值入口集中在个人中心</div>
+        <div class="auth-feature">已购内容长期保存</div>
+      </div>
+    </div>
+    <form class="auth-card" onsubmit="submitAuth(event)">
+      <h2 id="authTitle">欢迎回来</h2>
+      <p id="authDesc">登录后查看积分余额与已购内容</p>
+      <div class="form-stack">
+        <div class="field"><label for="accountEmail">邮箱地址</label><input id="accountEmail" type="email" autocomplete="email" placeholder="name@example.com" required></div>
+        <div class="field"><label for="accountPassword">密码</label><input id="accountPassword" type="password" autocomplete="current-password" placeholder="至少 10 位" minlength="10" required></div>
+        <button class="sbtn primary block" id="authSubmit">登录</button>
+      </div>
+      <button class="auth-switch" type="button" id="authSwitch" onclick="toggleAuthMode()">还没有账号？创建账号</button>
+      <div class="auth-note">管理员也使用账号密码登录，但需要从独立的后台入口进入。</div>
+    </form>
+  </section>
+
+  <section id="dashboard" class="dashboard hidden">
+    <div class="profile-banner">
+      <div class="profile-main">
+        <div class="avatar" id="avatar">U</div>
+        <div><h2 id="profileEmail">账户</h2><p><span id="profileRole">普通用户</span><span class="role-pill" id="rolePill">MEMBER</span></p></div>
+      </div>
+      <div class="profile-actions">
+        <a class="sbtn sm" href="/shop">浏览商品</a>
+        <button class="sbtn sm" onclick="logout()">退出登录</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><span>当前积分</span><b id="statPoints">—</b></div>
+      <div class="stat"><span>已使用积分</span><b id="statUsed">—</b></div>
+      <div class="stat"><span>已购内容</span><b id="statOrders">—</b></div>
+    </div>
+
+    <div>
+      <div class="account-tabs" role="tablist">
+        <button class="account-tab active" data-account-tab="recharge">充值积分</button>
+        <button class="account-tab" data-account-tab="orders">我的已购</button>
+        <button class="account-tab" data-account-tab="profile">账户信息</button>
+      </div>
+
+      <div class="account-panel" id="panel-recharge">
+        <div class="panel-box">
+          <div class="panel-head">
+            <div><h3>积分充值</h3><p id="planStatus">正在读取充值套餐…</p></div>
+            <button class="sbtn sm" onclick="loadPlans(this)">刷新套餐</button>
+          </div>
+          <div class="plan-grid" id="planGrid"><div class="empty-state">正在读取充值套餐…</div></div>
+          <div class="notice-line" style="margin-top:14px">充值入口由一人付提供。打开支付宝完成付款后，返回这里刷新积分余额。</div>
+        </div>
+      </div>
+
+      <div class="account-panel hidden" id="panel-orders">
+        <div class="panel-box">
+          <div class="panel-head">
+            <div><h3>我的已购</h3><p>兑换成功后的文本、链接和文件都会保存在这里。</p></div>
+            <div class="actions">
+              <button class="sbtn sm" onclick="syncOrders(this)">同步待确认订单</button>
+              <button class="sbtn sm" onclick="loadOrders(this)">刷新</button>
+            </div>
+          </div>
+          <div class="order-list" id="orderList"><div class="empty-state">正在加载已购内容…</div></div>
+        </div>
+      </div>
+
+      <div class="account-panel hidden" id="panel-profile">
+        <div class="panel-box">
+          <div class="panel-head"><div><h3>账户信息</h3><p>账号身份与当前登录信息。</p></div></div>
+          <div class="info-list">
+            <div class="info-row"><span>邮箱</span><b id="infoEmail">—</b></div>
+            <div class="info-row"><span>账号角色</span><b id="infoRole">—</b></div>
+            <div class="info-row"><span>账号 ID</span><b id="infoId" style="font:11px ui-monospace,Menlo,monospace">—</b></div>
+          </div>
+          <div class="actions" style="margin-top:16px">
+            <a class="sbtn" id="adminLink" href="/admin" target="_blank" rel="noopener">进入管理后台</a>
+            <button class="sbtn" onclick="logout()">退出登录</button>
+          </div>
+          <div class="notice-line" style="margin-top:14px">如需修改账号密码，请联系管理员在后台重置。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span>
+    <a href="/shop" style="color:var(--muted)">全部商品</a>
+  </div>
+</footer>
+
+<div class="modal" id="payModal" role="dialog" aria-modal="true" aria-labelledby="payTitle">
+  <div class="modal-dialog">
+    <button class="modal-close" aria-label="关闭" onclick="Store.setModal('#payModal', false)">×</button>
+    <h2 id="payTitle">支付宝充值入口</h2>
+    <p>这是购买入口，不是支付成功凭证。付款完成后请刷新积分余额。</p>
+    <div id="payDetails" class="paybox"></div>
+    <button class="sbtn primary block" style="margin-top:14px" onclick="closePayAndRefresh()">我已完成支付，刷新积分</button>
+  </div>
+</div>
+
+<div class="modal" id="deliveryModal" role="dialog" aria-modal="true" aria-labelledby="deliveryTitle">
+  <div class="modal-dialog">
+    <button class="modal-close" aria-label="关闭" onclick="Store.setModal('#deliveryModal', false)">×</button>
+    <h2 id="deliveryTitle">兑换成功</h2>
+    <p id="deliverySub">内容已保存到「我的已购」。</p>
+    <div id="deliveryBody"></div>
+  </div>
+</div>
+
+<script src="/storefront.js"></script>
+<script>
+const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
+let me = null, points = null, authMode = 'login';
+const nextUrl = (() => {
+  const next = query().get('next') || '';
+  return next.startsWith('/') && !next.startsWith('//') ? next : '';
+})();
+
+function showAuth() {
+  $('#accountLoading').classList.add('hidden');
+  $('#dashboard').classList.add('hidden');
+  $('#authView').classList.remove('hidden');
+}
+
+function showDashboard() {
+  $('#accountLoading').classList.add('hidden');
+  $('#authView').classList.add('hidden');
+  $('#dashboard').classList.remove('hidden');
+  renderProfile();
+  const tab = ['recharge', 'orders', 'profile'].includes(query().get('tab')) ? query().get('tab') : 'recharge';
+  switchTab(tab, false);
+  loadAccess();
+  loadPlans();
+  loadOrders();
+}
+
+function renderProfile() {
+  const email = me?.email || '账户';
+  $('#avatar').textContent = email.slice(0, 1).toUpperCase();
+  $('#profileEmail').textContent = email;
+  const isAdmin = me?.role === 'admin';
+  $('#profileRole').textContent = isAdmin ? '管理员账号' : '普通用户';
+  $('#rolePill').textContent = isAdmin ? 'ADMIN' : 'MEMBER';
+  $('#infoEmail').textContent = email;
+  $('#infoRole').textContent = isAdmin ? '管理员' : '普通用户';
+  $('#infoId').textContent = me?.id || '—';
+  $('#adminLink').classList.toggle('hidden', !isAdmin);
+}
+
+function toggleAuthMode() {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  $('#authTitle').textContent = authMode === 'login' ? '欢迎回来' : '创建你的账号';
+  $('#authDesc').textContent = authMode === 'login' ? '登录后查看积分余额与已购内容' : '注册后即可充值积分并兑换商品';
+  $('#authSubmit').textContent = authMode === 'login' ? '登录' : '创建账号';
+  $('#authSwitch').textContent = authMode === 'login' ? '还没有账号？创建账号' : '已有账号？返回登录';
+  $('#accountPassword').autocomplete = authMode === 'login' ? 'current-password' : 'new-password';
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  return withBusy($('#authSubmit'), async () => {
+    try {
+      const data = await api('/api/auth/' + authMode, {
+        method: 'POST',
+        body: JSON.stringify({ email: $('#accountEmail').value, password: $('#accountPassword').value })
+      });
+      toast(authMode === 'login' ? '登录成功' : '注册成功');
+      location.href = nextUrl || '/account';
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+}
+
+async function logout() {
+  try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
+  location.href = '/';
+}
+
+async function loadAccess() {
+  try {
+    const data = await api('/api/access');
+    if (data.requires_consumption) {
+      points = Number(data.remaining ?? 0);
+      $('#statPoints').textContent = points;
+      $('#statUsed').textContent = Number(data.used ?? 0);
+      setPoints(points);
+    } else {
+      points = null;
+      $('#statPoints').textContent = '—';
+      $('#statUsed').textContent = '—';
+      toast('一人付当前不是积分模式，暂时无法兑换商品');
+    }
+  } catch (error) {
+    $('#statPoints').textContent = '—';
+    $('#statUsed').textContent = '—';
+    toast(error.message);
+  }
+}
+
+function modeLabel(mode) {
+  return ({ ONE_TIME: '永久买断', ONE_TIME_DURATION: '时长包', QUANTITY: '积分 / 次数包' })[mode] || '收费配置尚未完成';
+}
+function planDetail(option) {
+  if (option.entitlement_rule === 'QUOTA') return `到账 ${Number(option.quota_amount) || '—'} ${option.quota_unit === 'POINT' ? '积分' : '次'}`;
+  if (option.entitlement_rule === 'FIXED_DURATION') return '按日历周期生效';
+  return '支付后永久解锁';
+}
+
+async function loadPlans(button) {
+  return withBusy(button, async () => {
+    const grid = $('#planGrid');
+    try {
+      const data = await api('/api/product');
+      const options = Array.isArray(data.charging_options) ? data.charging_options : [];
+      $('#planStatus').textContent = `${modeLabel(data.billing_mode)} · 状态 ${data.capability_status || '未知'}`;
+      if (!options.length) {
+        grid.innerHTML = `<div class="empty-state"><b>${data.capability_status === 'NOT_CONFIGURED' ? '收费方式尚未配置' : '暂时没有可售充值套餐'}</b>请稍后再试，或联系管理员。</div>`;
+        return;
+      }
+      const open = data.capability_status === 'ENABLED';
+      grid.innerHTML = options.map((option, index) => `<article class="plan-card">
+        <div class="plan-name">${esc(option.display_name || '积分套餐')}</div>
+        <div class="plan-detail">${esc(planDetail(option))}</div>
+        <div class="plan-price">${esc(option.price || '—')} <small>${esc(option.currency || 'CNY')}</small></div>
+        <button class="sbtn sm ${index === 0 ? 'primary' : ''}" ${open ? '' : 'disabled'} onclick="buyPoints('${esc(option.sku_id || '')}', this)">${open ? '支付宝充值' : '暂不可购买'}</button>
+      </article>`).join('');
+    } catch (error) {
+      grid.innerHTML = `<div class="empty-state"><b>暂时无法读取充值套餐</b>${esc(error.message)}</div>`;
+      $('#planStatus').textContent = '服务端只读查询暂不可用';
+    }
+  });
+}
+
+async function buyPoints(sku, button) {
+  return withBusy(button, async () => {
+    try {
+      const data = await api('/api/purchase', {
+        method: 'POST',
+        body: JSON.stringify({ idempotency_key: 'buy-' + crypto.randomUUID(), sku_id: sku })
+      });
+      if (data.status === 'READY' && data.purchase_url) {
+        $('#payDetails').innerHTML = `<div><b>${esc(data.charging_option?.display_name || '积分充值')}</b></div>
+          <div style="margin-top:6px;color:#6e7971">入口有效期：${esc(data.expire_time || '以支付宝页面为准')}</div>
+          <p style="margin:10px 0 0"><a href="${esc(data.purchase_url)}" target="_blank" rel="noopener">打开支付宝继续付款 →</a></p>
+          ${data.purchase_qr_code ? `<div style="margin-top:6px;color:#6e7971">二维码：<a href="${esc(data.purchase_qr_code)}" target="_blank" rel="noopener">打开二维码</a></div>` : ''}`;
+      } else {
+        $('#payDetails').textContent = data.message || `购买状态：${data.status || '待确认'}，请勿重复创建购买请求。`;
+      }
+      setModal('#payModal', true, '.modal-close');
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+}
+
+function closePayAndRefresh() {
+  setModal('#payModal', false);
+  loadAccess();
+}
+
+async function loadOrders(button) {
+  return withBusy(button, async () => {
+    try {
+      const data = await api('/api/orders');
+      const items = data.items || [];
+      $('#statOrders').textContent = items.length;
+      if (!items.length) {
+        $('#orderList').innerHTML = '<div class="empty-state"><b>还没有已购内容</b>去商品页挑一件需要的吧。<div class="actions" style="justify-content:center;margin-top:12px"><a class="sbtn sm primary" href="/shop">浏览商品</a></div></div>';
+        return;
+      }
+      $('#orderList').innerHTML = items.map(order => {
+        const pill = order.status === 'DELIVERED' ? '<span class="status-pill ok">已交付</span>'
+          : order.status === 'PENDING' ? '<span class="status-pill wait">待确认</span>' : '<span class="status-pill bad">失败</span>';
+        return `<article class="order-card">
+          <div class="order-top">
+            <div><h4>${esc(order.title)}</h4><div class="order-meta">${esc(order.order_no)} · ${Number(order.price_points)} 积分 · ${esc(fmtTime(order.created_at))}</div></div>
+            ${pill}
+          </div>
+          ${order.status === 'PENDING' ? '<div class="delivery-block"><div class="order-meta">扣减结果尚未确认，点击「同步待确认订单」查询，不会重复扣积分。</div></div>' : deliveryHtml(order.delivery)}
+        </article>`;
+      }).join('');
+    } catch (error) {
+      $('#orderList').innerHTML = `<div class="empty-state">${esc(error.message)}</div>`;
+    }
+  });
+}
+
+async function syncOrders(button) {
+  return withBusy(button, async () => {
+    try {
+      const data = await api('/api/orders/sync', { method: 'POST', body: '{}' });
+      toast(data.synced ? `已同步 ${data.synced} 笔订单` : '没有需要同步的订单');
+      await loadOrders();
+      await loadAccess();
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+}
+
+function switchTab(name, updateUrl = true) {
+  $$('.account-tab').forEach(button => button.classList.toggle('active', button.dataset.accountTab === name));
+  $$('.account-panel').forEach(panel => panel.classList.add('hidden'));
+  $('#panel-' + name).classList.remove('hidden');
+  if (updateUrl) {
+    const next = new URLSearchParams(location.search);
+    next.set('tab', name);
+    history.replaceState(null, '', '/account?' + next);
+  }
+}
+
+$$('.account-tab').forEach(button => button.addEventListener('click', () => switchTab(button.dataset.accountTab)));
+$('#year').textContent = new Date().getFullYear();
+
+(async () => {
+  const chrome = await initChrome('account');
+  me = chrome.me;
+  if (!me) { showAuth(); return; }
+  showDashboard();
+})();
+</script>
+</body>
+</html>
