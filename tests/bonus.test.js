@@ -443,3 +443,82 @@ sqliteTest('admin preview consumes a mocked Skill-style root and child without l
   assert.equal(calls.length, 2);
   for (const secret of ['privateId', 'A1b2', 'temporary-stoken', 'hidden-folder', 'hidden-file']) assert.ok(!JSON.stringify(json).includes(secret));
 });
+
+sqliteTest('an administrator cannot disable their own account or invalidate any of their sessions', async t => {
+  const DB = await makeDb(), env = { DB };
+  t.after(() => DB.raw.close());
+  for (const [token, role] of [['second-admin-token', 'admin'], ['admin-user-token', 'user']]) {
+    DB.raw.prepare('INSERT INTO sessions(token_hash,user_id,role,expires_at,created_at) VALUES(?,?,?,?,?)')
+      .run(createHash('sha256').update(token).digest('base64url'), 'usr_admin', role, 9999999999, '2026-01-01');
+  }
+  DB.raw.prepare("UPDATE users SET updated_at='before-attempt' WHERE id='usr_admin'").run();
+  const beforeUser = DB.raw.prepare("SELECT disabled,updated_at FROM users WHERE id='usr_admin'").get();
+  const beforeSessions = DB.raw.prepare("SELECT token_hash,role FROM sessions WHERE user_id='usr_admin' ORDER BY token_hash").all();
+  const beforeAudit = DB.raw.prepare('SELECT COUNT(*) AS n FROM admin_audit').get().n;
+
+  for (const token of ['admin-token', 'second-admin-token']) {
+    const res = await worker.fetch(new Request('https://example.test/api/admin/users/usr_admin/status', {
+      method: 'POST',
+      headers: { cookie: `onepay_admin_session=${token}`, 'content-type': 'application/json' },
+      // A caller-supplied identity must not influence which account is protected.
+      body: JSON.stringify({ disabled: true, current_user_id: 'usr_user' }),
+    }), env);
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: '不能停用当前登录的管理员账号', error_code: 'SELF_DISABLE_FORBIDDEN' });
+  }
+  assert.deepEqual(DB.raw.prepare("SELECT disabled,updated_at FROM users WHERE id='usr_admin'").get(), beforeUser);
+  assert.deepEqual(DB.raw.prepare("SELECT token_hash,role FROM sessions WHERE user_id='usr_admin' ORDER BY token_hash").all(), beforeSessions);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM admin_audit').get().n, beforeAudit);
+
+  const me = await worker.fetch(request('/api/admin/me', { admin: true }), env);
+  assert.equal((await me.json()).authenticated, true);
+  const frontMe = await worker.fetch(new Request('https://example.test/api/auth/me', { headers: { cookie: 'onepay_session=admin-user-token' } }), env);
+  assert.equal((await frontMe.json()).authenticated, true);
+
+  // An idempotent enable is not a disable and must not revoke sessions either.
+  const enable = await worker.fetch(request('/api/admin/users/usr_admin/status', { admin: true, method: 'POST', body: { disabled: false } }), env);
+  assert.equal(enable.status, 200);
+  assert.equal((await enable.json()).disabled, false);
+  assert.deepEqual(DB.raw.prepare("SELECT token_hash,role FROM sessions WHERE user_id='usr_admin' ORDER BY token_hash").all(), beforeSessions);
+});
+
+sqliteTest('administrators can still disable and enable other users and administrators', async t => {
+  const DB = await makeDb(), env = { DB };
+  t.after(() => DB.raw.close());
+  DB.raw.exec("INSERT INTO users(id,email,password_hash,created_at,role) VALUES('usr_other_admin','other-admin@example.com','x','2026-01-02','admin')");
+  DB.raw.prepare('INSERT INTO sessions(token_hash,user_id,role,expires_at,created_at) VALUES(?,?,?,?,?)')
+    .run(createHash('sha256').update('other-admin-token').digest('base64url'), 'usr_other_admin', 'admin', 9999999999, '2026-01-01');
+  const otherList = await worker.fetch(new Request('https://example.test/api/admin/users', { headers: { cookie: 'onepay_admin_session=other-admin-token' } }), env);
+  assert.equal((await otherList.json()).current_user_id, 'usr_other_admin');
+  const otherSelf = await worker.fetch(new Request('https://example.test/api/admin/users/usr_other_admin/status', {
+    method: 'POST', headers: { cookie: 'onepay_admin_session=other-admin-token', 'content-type': 'application/json' }, body: JSON.stringify({ disabled: true }),
+  }), env);
+  assert.equal(otherSelf.status, 400);
+  assert.equal((await otherSelf.json()).error_code, 'SELF_DISABLE_FORBIDDEN');
+  const list = await worker.fetch(request('/api/admin/users?q=user%40example.com', { admin: true }), env);
+  assert.equal(list.status, 200);
+  assert.equal(list.headers.get('cache-control'), 'private, no-store');
+  const data = await list.json();
+  assert.equal(data.current_user_id, 'usr_admin'); // Present even when the current account is filtered out.
+  assert.deepEqual(data.items.map(u => u.id), ['usr_user']);
+  const unauthenticated = await worker.fetch(request('/api/admin/users/usr_admin/status', { method: 'POST', body: { disabled: true } }), env);
+  assert.equal(unauthenticated.status, 401);
+
+  for (const target of ['usr_user', 'usr_other_admin']) {
+    const disabled = await worker.fetch(request(`/api/admin/users/${target}/status`, { admin: true, method: 'POST', body: { disabled: true } }), env);
+    assert.equal(disabled.status, 200);
+    assert.equal((await disabled.json()).disabled, true);
+    assert.equal(DB.raw.prepare('SELECT disabled FROM users WHERE id=?').get(target).disabled, 1);
+    assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id=?').get(target).n, 0);
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM admin_audit WHERE action='user.disabled' AND target=?").get(target).n, 1);
+
+    const enabled = await worker.fetch(request(`/api/admin/users/${target}/status`, { admin: true, method: 'POST', body: { disabled: false } }), env);
+    assert.equal(enabled.status, 200);
+    assert.equal((await enabled.json()).disabled, false);
+    assert.equal(DB.raw.prepare('SELECT disabled FROM users WHERE id=?').get(target).disabled, 0);
+    assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id=?').get(target).n, 0);
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM admin_audit WHERE action='user.enabled' AND target=?").get(target).n, 1);
+  }
+  assert.equal((await (await worker.fetch(request('/api/admin/me', { admin: true }), env)).json()).authenticated, true);
+  assert.equal((await (await worker.fetch(request('/api/auth/me'), env)).json()).authenticated, false);
+});

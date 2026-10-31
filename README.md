@@ -132,6 +132,22 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 
 之后可在后台「用户管理」直接设置或取消管理员角色，不需要再操作数据库。`0004` 迁移会把迁移前已存在的 `zj` 开头账号提升为管理员；此后新注册的账号不会仅凭邮箱前缀自动获得后台权限，避免公开注册导致提权。
 
+### 恢复误停用的管理员
+
+如果没有其他管理员可以在后台启用该账号，请先备份 D1，并确认 Wrangler 当前登录的 Cloudflare 账号和仓库 `wrangler.toml` 中的数据库均正确。以下 `--remote` 命令直接操作远程数据库，不会部署 Worker。先查看管理员账号并记下需恢复的完整 ID：
+
+```bash
+npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "SELECT id,email,role,disabled FROM users WHERE role='admin';"
+```
+
+将下面的 `替换为完整管理员ID` 换成刚刚确认的 ID 后执行。命令只启用仍具有 `admin` 角色且已停用的指定账号，不修改密码或授予权限：
+
+```bash
+npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "UPDATE users SET disabled=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id='替换为完整管理员ID' AND role='admin' AND disabled=1;"
+```
+
+再次执行查询，确认该账号的 `disabled` 为 `0`。停用时原会话已被撤销，恢复后请用原邮箱和密码重新登录 `/admin`。若找不到账号或角色不是 `admin`，不要盲目执行提权，应先确认账号和数据库。
+
 ## 上架第一件商品
 
 1. 打开 `/admin`，使用管理员账号登录。
@@ -246,7 +262,7 @@ curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
 
 ## 安全行为
 
-- 前台用户与后台管理员使用不同 Cookie；后台每次请求都会重新校验账号角色与停用状态，降权、停用后旧后台会话立即失效。
+- 前台用户与后台管理员使用不同 Cookie；后台每次请求都会重新校验账号角色与停用状态，降权、停用后旧后台会话立即失效。管理员不能停用当前登录的账号，但仍可停用或启用其他账号。
 - 管理员角色只能由现有管理员在后台授予；新注册账号固定为普通用户，不按邮箱前缀自动提权。
 - 前端价格仅用于展示；购买积分只传有效 `sku_id`，不传价格或 plan ID。
 - 兑换商品时扣减数量由服务端按商品当前积分价决定，前端传价格无效。
