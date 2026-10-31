@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <meta name="description" content="发现精选数字商品，用积分轻松兑换。">
 <title>云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261030-2">
+<link rel="stylesheet" href="/storefront.css?v=20261031-2">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -98,7 +98,7 @@
   </div>
   <div class="container footer-bottom"><span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span><span>用一点积分，兑换一点喜欢。 &nbsp; ✦</span></div>
 </footer>
-<script src="/storefront.js?v=20261030-2"></script>
+<script src="/storefront.js?v=20261031-2"></script>
 <script>
 const { $, esc, api, initChrome, productCover } = Store;
 const categoryIcons = [
@@ -126,7 +126,7 @@ function renderHomeCategories(items) {
   }).join('');
 }
 
-function renderFeatured(products, categories) {
+function renderFeatured(products, categories, canEdit = false) {
   const grid = $('#featuredProducts');
   if (!products.length) {
     grid.innerHTML = '<div class="empty-state"><span class="empty-icon">✳</span><b>好物正在准备中</b>商品上架后，就会出现在这里。</div>';
@@ -135,23 +135,30 @@ function renderFeatured(products, categories) {
   grid.innerHTML = products.slice(0, 4).map((product, index) => {
     const category = categories.find(item => item.id === product.category_id)?.name || '数字好物';
     const soldOut = product.stock !== null && product.stock !== undefined && Number(product.stock) <= 0;
-    return `<a class="featured-card" href="/shop?q=${encodeURIComponent(product.title)}">
+    return `<article class="featured-card"><a class="featured-main" href="/shop?q=${encodeURIComponent(product.title)}">
       ${productCover(product, index)}
       <div class="featured-body"><div class="product-cat">${esc(category)}</div><h3>${esc(product.title)}</h3>
         <p class="summary">${esc(product.summary || '探索更多值得收藏的数字内容')}</p>
         <div class="featured-footer"><div class="price">${Number(product.price_points).toLocaleString('zh-CN')} <small>积分</small></div><span class="round-arrow" aria-label="查看商品">${soldOut ? '已售罄' : '↗'}</span></div></div>
-    </a>`;
+    </a>${canEdit ? `<a class="admin-edit-link featured-edit" href="/admin?edit=${encodeURIComponent(product.id)}">✎ 编辑商品</a>` : ''}</article>`;
   }).join('');
 }
 
 (async () => {
   $('#year').textContent = new Date().getFullYear();
-  const [, categoryResult, productResult] = await Promise.allSettled([initChrome('home'), api('/api/categories'), api('/api/products')]);
+  // Render public content without waiting for the independent login-state request.
+  const chrome = initChrome('home');
+  const admin = api('/api/admin/me').catch(() => null);
+  const [categoryResult, productResult] = await Promise.allSettled([api('/api/categories'), api('/api/products')]);
   const categories = categoryResult.status === 'fulfilled' ? (categoryResult.value.items || []) : [];
   if (categoryResult.status === 'fulfilled') renderHomeCategories(categories);
   else $('#homeCategories').innerHTML = `<div class="empty-state"><b>暂时无法读取分类</b>${esc(categoryResult.reason.message)}</div>`;
   if (productResult.status === 'fulfilled') renderFeatured(productResult.value.items || [], categories);
   else $('#featuredProducts').innerHTML = `<div class="empty-state"><b>暂时无法读取商品</b>${esc(productResult.reason.message)}</div>`;
+  const [chromeResult, adminResult] = await Promise.all([chrome, admin]);
+  if (productResult.status === 'fulfilled' && (chromeResult.me?.role === 'admin' || adminResult?.authenticated)) {
+    renderFeatured(productResult.value.items || [], categories, true);
+  }
 })();
 </script>
 </body>

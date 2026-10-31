@@ -213,3 +213,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .announcement-divider, .announcement-divider + span { display: none; }.brand-copy small { display: none; }.header-search { display: none; }.hero-copy { padding-left: 22px; padding-right: 22px; }.hero-actions .text-link { gap: 7px; }.hero-visual { min-height: 230px; }.category-card { align-items: start; flex-direction: column; min-height: 139px; }.category-copy { padding-right: 0; }.featured-grid .product-cover, .product-cover { height: 123px; }.product-footer { align-items: start; flex-direction: column; }.product-footer .sbtn { width: 100%; }.steps { grid-template-columns: 1fr; }.step { min-height: 0; display: grid; grid-template-columns: 30px 40px 1fr; column-gap: 10px; align-items: center; }.step-icon { grid-row: 1 / 3; grid-column: 2; margin: 0; }.step h3 { grid-column: 3; }.step p { grid-column: 3; }.step-num { grid-row: 1 / 3; }.cta-band { align-items: start; flex-direction: column; gap: 18px; }.cta-band h2 { font-size: 18px; }.shop-toolbar { align-items: stretch; flex-direction: column; }.selectbox { width: 100%; }.profile-banner { align-items: start; flex-direction: column; padding: 22px; }.stats { grid-template-columns: 1fr 1fr; }.stat:last-child { grid-column: 1 / -1; }.footer-main { grid-template-columns: 1fr 1fr; }.footer-brand { grid-column: 1 / -1; }.footer-bottom { flex-direction: column; gap: 5px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *,*::before,*::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+
+/* Administrator shortcuts are shown only after a private role check. */
+.admin-edit-link { align-self:flex-start; display:inline-flex; align-items:center; min-height:32px; padding:5px 9px; border:1px solid #ded6f1; border-radius:8px; background:#f7f4ff; color:#6e55c4; text-decoration:none; font-size:11px; font-weight:750; }
+.admin-edit-link:hover { background:#ede7fb; }
+@media (max-width:760px) { .admin-edit-link { min-height:38px; } .auth-card input, .auth-card select, .auth-card textarea { font-size:16px; } }
+
+.featured-main { min-width:0; display:flex; flex:1; flex-direction:column; color:inherit; text-decoration:none; }
+.featured-edit { margin:0 17px 14px; }

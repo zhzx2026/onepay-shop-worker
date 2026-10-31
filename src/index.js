@@ -1,3 +1,6 @@
+import { cachedPublicJson, invalidatePublicCache, withStaticCache } from './cache.js';
+import { bonusBalance, bonusHistory, adjustBonus, reserveOrder, refundOrder } from './bonus.js';
+
 const API = 'https://ai6666.com/opcpay/api/pay/v1';
 const encoder = new TextEncoder();
 // Cloudflare Workers 的 WebCrypto 对 PBKDF2 迭代次数上限为 100000，超过会直接抛错。
@@ -12,43 +15,6 @@ function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', ...headers } });
 }
 function fail(status, error, code = 'REQUEST_FAILED') { return json({ error, error_code: code }, status); }
-const PUBLIC_CACHE_PATHS = ['/api/products', '/api/categories', '/api/config'];
-async function cachedPublicJson(request, env, produce, ttl = 30) {
-  if (request.method !== 'GET' || typeof caches === 'undefined' || !caches.default) return produce();
-  const cache = caches.default;
-  const key = new Request(new URL(request.url).toString(), { method: 'GET' });
-  try {
-    const hit = await cache.match(key);
-    if (hit) {
-      const headers = new Headers(hit.headers);
-      headers.set('x-cache', 'HIT');
-      return new Response(hit.body, { status: hit.status, headers });
-    }
-  } catch {}
-  const response = await produce();
-  if (!response.ok) return response;
-  const headers = new Headers(response.headers);
-  headers.set('cache-control', `public, max-age=0, s-maxage=${ttl}, stale-while-revalidate=${ttl * 5}`);
-  headers.set('x-cache', 'MISS');
-  const cached = new Response(response.body, { status: response.status, headers });
-  try { await cache.put(key, cached.clone()); } catch {}
-  return cached;
-}
-async function invalidatePublicCache(request) {
-  if (typeof caches === 'undefined' || !caches.default) return;
-  const origin = new URL(request.url).origin;
-  await Promise.all(PUBLIC_CACHE_PATHS.map(path => caches.default.delete(new Request(origin + path, { method: 'GET' }))));
-}
-function withStaticCache(response, pathname) {
-  if (!response.ok || response.headers.has('set-cookie')) return response;
-  const headers = new Headers(response.headers);
-  const isHtml = pathname.endsWith('.html') || pathname === '/';
-  headers.set('cache-control', isHtml
-    ? 'public, max-age=0, s-maxage=300, stale-while-revalidate=900'
-    : 'public, max-age=60, s-maxage=300, stale-while-revalidate=900');
-  headers.set('x-cache', 'ASSET');
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-}
 function now() { return new Date().toISOString(); }
 function id(prefix = '') { return prefix + crypto.randomUUID(); }
 function b64(bytes) { return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
@@ -164,7 +130,8 @@ async function listUsers(env, url) {
     `SELECT u.id, u.email, u.role, u.created_at, u.last_login_at, COALESCE(u.disabled,0) AS disabled,
        (SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.id AND s.expires_at > ?) AS sessions,
        (SELECT COUNT(*) FROM purchase_intents p WHERE p.user_id=u.id) AS purchases,
-       (SELECT COUNT(*) FROM orders o WHERE o.user_id=u.id AND o.status='DELIVERED') AS orders
+       (SELECT COUNT(*) FROM orders o WHERE o.user_id=u.id AND o.status='DELIVERED') AS orders,
+       COALESCE((SELECT balance FROM bonus_wallets w WHERE w.user_id=u.id),0) AS bonus_points
      FROM users u ${filter} ORDER BY u.created_at DESC LIMIT ? OFFSET ?`
   ).bind(Math.floor(Date.now() / 1000), ...args, limit, offset).all();
   return { total: totalRow?.c || 0, limit, offset, items: rows.results || [] };
@@ -174,7 +141,7 @@ async function yirenfu(env, path, method = 'GET', payload) {
   if (!key) throw Object.assign(new Error('服务端尚未配置一人付 API Key'), { status: 503, code: 'YIRENFU_KEY_MISSING' });
   const headers = { Authorization: `Bearer ${key}`, Accept: 'application/json' };
   if (payload !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(`${API}${path}`, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload) });
+  const response = await fetch(`${API}${path}`, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload), signal: AbortSignal.timeout(20000) });
   let data;
   try { data = await response.json(); } catch { data = { error: '一人付返回了无法解析的响应', error_code: 'INVALID_UPSTREAM_RESPONSE' }; }
   return { response, data };
@@ -208,99 +175,79 @@ async function config(env) {
 
 /* ---------------- 积分核销（一人付 /access + /consume 幂等） ---------------- */
 
-async function saveLedger(env, key, result) {
+async function saveLedger(env, key, result, token) {
   try {
-    await env.DB.prepare('UPDATE consumption_jobs SET status=?,response_json=?,updated_at=? WHERE idempotency_key=?')
-      .bind(result.status || 'UNKNOWN', JSON.stringify(result), now(), key).run();
+    await env.DB.prepare("UPDATE consumption_jobs SET status=?,response_json=?,updated_at=? WHERE idempotency_key=? AND EXISTS (SELECT 1 FROM orders WHERE idempotency_key=? AND status='PENDING' AND processing_token=?)")
+      .bind(result.status || 'UNKNOWN', JSON.stringify(result), now(), key, key, token).run();
   } catch {}
 }
-async function consumePoints(env, user, key, amount, reason) {
-  const capResp = await checkCapability(env, 'entitlement_query');
-  // definitive=true 表示尚未发生任何扣减，可以安全回滚库存。
-  if (capResp) return { state: 'ERROR', definitive: true, response: capResp };
+function pendingConsumption(key, message = '积分扣减结果待确认，请稍后同步订单') {
+  return { state: 'PENDING', response: json({ business_id: key, delivered: false, message }, 202) };
+}
 
-  const ledger = await env.DB.prepare('SELECT * FROM consumption_jobs WHERE idempotency_key=?').bind(key).first();
+function consumptionResult(key, result) {
+  if (result.status === 'SUCCEEDED' && result.confirmed === true) return { state: 'DONE', result };
+  if (['FAILED', 'CANCELED', 'REJECTED', 'EXPIRED'].includes(result.status)) {
+    return { state: 'FAILED', response: json({ consumption: result, business_id: key, error: '积分扣减未成功', error_code: 'CONSUME_FAILED' }, 409) };
+  }
+  return pendingConsumption(key);
+}
+
+async function consumePoints(env, user, key, amount, reason, token) {
+  let ledger = await env.DB.prepare('SELECT * FROM consumption_jobs WHERE idempotency_key=?').bind(key).first();
   if (ledger) {
-    if (ledger.user_id !== user.id || ledger.amount !== amount || ledger.reason !== reason) {
-      return { state: 'FAILED', response: fail(409, '同一业务编号必须保持原用户、数量和说明', 'IDEMPOTENCY_CONFLICT') };
+    if (ledger.user_id !== user.id || Number(ledger.amount) !== amount || ledger.reason !== reason) {
+      // An unrelated upstream request may already exist; never refund a potentially consumed order.
+      return pendingConsumption(key, '原扣减记录参数不一致，请联系管理员核对');
     }
-    let saved = null;
+    let saved = {};
     try { saved = JSON.parse(ledger.response_json || '{}'); } catch {}
-    if (saved && saved.status === 'SUCCEEDED' && saved.confirmed === true) return { state: 'DONE', result: saved };
-    if (saved && ['FAILED', 'CANCELED', 'REJECTED', 'EXPIRED'].includes(saved.status)) {
-      return { state: 'FAILED', response: json({ consumption: saved, business_id: key }, 409) };
+    if (saved.status === 'SUCCEEDED' && saved.confirmed === true || ['FAILED', 'CANCELED', 'REJECTED', 'EXPIRED'].includes(saved.status)) {
+      return consumptionResult(key, saved);
+    }
+    // CREATED is a legacy state and may already have been sent before a crash.
+    // SUBMITTED/UNKNOWN/PROCESSING are also ambiguous: only query the original ID.
+    if (ledger.status !== 'PREPARING') {
+      const prior = await yirenfu(env, '/consumption', 'POST', { user_id: user.id, idempotency_key: key }).catch(() => null);
+      if (!prior?.response.ok) return pendingConsumption(key);
+      await saveLedger(env, key, prior.data, token);
+      return consumptionResult(key, prior.data);
     }
   } else {
     try {
       await env.DB.prepare('INSERT INTO consumption_jobs(idempotency_key,user_id,amount,reason,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
-        .bind(key, user.id, amount, reason, 'CREATED', now(), now()).run();
-    } catch {
-      return { state: 'FAILED', response: fail(409, '业务编号已被使用，请刷新后重试', 'IDEMPOTENCY_CONFLICT') };
-    }
+        .bind(key, user.id, amount, reason, 'PREPARING', now(), now()).run();
+    } catch { return pendingConsumption(key); }
   }
 
-  let access;
-  try { access = await yirenfu(env, '/access', 'POST', { user_id: user.id }); }
-  catch (e) { return { state: 'ERROR', definitive: true, response: fail(e.status || 503, e.message || '查询积分失败', e.code || 'UPSTREAM_ERROR') }; }
-  if (!access.response.ok) {
-    return { state: 'ERROR', definitive: true, response: json({ error: access.data.error || '积分查询失败', error_code: access.data.error_code || 'ACCESS_FAILED' }, access.response.status) };
+  // No upstream debit has been sent in PREPARING; failures here can safely release the reservation.
+  try {
+    const capResp = await checkCapability(env, 'entitlement_query');
+    if (capResp) return { state: 'ERROR', definitive: true, response: capResp };
+    const access = await yirenfu(env, '/access', 'POST', { user_id: user.id });
+    if (!access.response.ok) return { state: 'ERROR', definitive: true, response: json({ error: access.data.error || '积分查询失败', error_code: access.data.error_code || 'ACCESS_FAILED' }, access.response.status) };
+    const a = access.data;
+    if (!a.requires_consumption) return { state: 'FAILED', response: json({ error: '一人付当前不是积分/次数模式，赠送积分不足时无法兑换。', error_code: 'BILLING_MODE_NOT_QUOTA', billing_mode: a.billing_mode || null }, 409) };
+    if (a.access_granted !== true || (typeof a.remaining === 'number' && a.remaining < amount)) {
+      return { state: 'FAILED', response: json({ error: `支付宝积分不足：还需 ${amount}，当前剩余 ${a.remaining ?? 0}。`, error_code: 'POINTS_INSUFFICIENT', required: amount, remaining: a.remaining ?? 0 }, 402) };
+    }
+    const cap = await checkCapability(env, 'consumption');
+    if (cap) return { state: 'ERROR', definitive: true, response: cap };
+  } catch (e) {
+    return { state: 'ERROR', definitive: true, response: fail(e.status || 503, e.message || '查询积分失败', e.code || 'UPSTREAM_ERROR') };
   }
-  const a = access.data;
-  if (!a.requires_consumption) {
-    // 一人付当前不是积分/次数模式（例如买断或时长包），无法按积分兑换商品。
-    return {
-      state: 'FAILED',
-      response: json({
-        error: '一人付当前收费方式不是积分/次数模式，无法按积分兑换。请在控制台把收费方式改为积分（QUOTA）后重试。',
-        error_code: 'BILLING_MODE_NOT_QUOTA',
-        billing_mode: a.billing_mode || null,
-      }, 409),
-    };
-  }
-  if (a.access_granted !== true || (typeof a.remaining === 'number' && a.remaining < amount)) {
-    return {
-      state: 'FAILED',
-      response: json({
-        error: `积分不足：需要 ${amount}，当前剩余 ${a.remaining ?? 0}。请先充值积分。`,
-        error_code: 'POINTS_INSUFFICIENT',
-        required: amount,
-        remaining: a.remaining ?? 0,
-        access: a,
-      }, 402),
-    };
-  }
-  const cap2 = await checkCapability(env, 'consumption');
-  if (cap2) return { state: 'ERROR', definitive: true, response: cap2 };
 
-  let prior = await yirenfu(env, '/consumption', 'POST', { user_id: user.id, idempotency_key: key }).catch(() => null);
-  let result = prior?.response.ok ? prior.data : null;
-  if (result && !(result.status === 'SUCCEEDED' && result.confirmed === true) && result.status !== 'UNKNOWN' && result.status !== 'PROCESSING') {
-    await saveLedger(env, key, result);
-    return { state: 'FAILED', response: json({ consumption: result, business_id: key, error: '积分扣减未成功', error_code: 'CONSUME_FAILED' }, 409) };
-  }
-  if (!result || result.status === 'UNKNOWN' || result.status === 'PROCESSING') {
-    let used;
-    try { used = await yirenfu(env, '/consume', 'POST', { user_id: user.id, idempotency_key: key, amount, reason }); }
-    catch (e) {
-      // 请求可能已送达上游，结果未知：不能回滚库存，也不能交付。
-      return { state: 'ERROR', definitive: false, response: fail(e.status || 503, e.message || '积分扣减请求未完成，结果未知', e.code || 'CONSUME_UNKNOWN') };
-    }
-    if (!used.response.ok) {
-      const definitive = used.response.status >= 400 && used.response.status < 500;
-      return {
-        state: definitive ? 'FAILED' : 'ERROR',
-        definitive,
-        response: json({ error: used.data.error || '积分扣减暂未完成', error_code: used.data.error_code || 'CONSUME_FAILED', business_id: key }, used.response.status),
-      };
-    }
-    result = used.data;
-  }
-  await saveLedger(env, key, result);
-  if (result.status === 'SUCCEEDED' && result.confirmed === true) return { state: 'DONE', result, access: a };
-  return {
-    state: 'PENDING',
-    response: json({ consumption: result, business_id: key, delivered: false, message: '积分扣减结果未确认，稍后会自动同步；同一订单不会重复扣减。' }, 202),
-  };
+  // Persist the intent before the network call. Once submitted, errors are ambiguous:
+  // retain both stock and bonus reservation until the original result is confirmed.
+  const submitted = await env.DB.prepare("UPDATE consumption_jobs SET status='SUBMITTED',updated_at=? WHERE idempotency_key=? AND status='PREPARING' AND EXISTS (SELECT 1 FROM orders WHERE idempotency_key=? AND status='PENDING' AND processing_token=? AND processing_until>=?)")
+    .bind(now(), key, key, token, Math.floor(Date.now() / 1000)).run();
+  if (!Number(submitted.meta?.changes || 0)) return pendingConsumption(key, '订单处理权已变更，请稍后同步');
+  let used;
+  try { used = await yirenfu(env, '/consume', 'POST', { user_id: user.id, idempotency_key: key, amount, reason }); }
+  catch { return pendingConsumption(key); }
+  if (!used.response.ok) return pendingConsumption(key);
+  await saveLedger(env, key, used.data, token);
+  return consumptionResult(key, used.data);
 }
 
 /* ---------------- 商品与订单 ---------------- */
@@ -430,6 +377,8 @@ function orderView(o) {
     product_id: o.product_id,
     title: o.title,
     price_points: o.price_points,
+    bonus_points_used: Number(o.bonus_points_used || 0),
+    onepay_points_used: Number(o.price_points) - Number(o.bonus_points_used || 0),
     status: o.status,
     delivery_type: o.delivery_type,
     created_at: o.created_at,
@@ -447,25 +396,8 @@ function orderDelivery(o) {
     },
   };
 }
-async function reserveStock(env, productId) {
-  const r = await env.DB.prepare("UPDATE products SET stock=stock-1, sold_count=sold_count+1, updated_at=? WHERE id=? AND status='ACTIVE' AND (stock IS NULL OR stock>0)")
-    .bind(now(), productId).run();
-  return Number(r.meta?.changes || 0) > 0;
-}
-async function releaseStock(env, productId) {
-  try {
-    await env.DB.prepare(`UPDATE products SET
-        stock = CASE WHEN stock IS NULL THEN NULL ELSE stock + 1 END,
-        sold_count = CASE WHEN sold_count > 0 THEN sold_count - 1 ELSE 0 END,
-        updated_at = ?
-      WHERE id = ?`).bind(now(), productId).run();
-  } catch {}
-}
-async function markOrder(env, key, status) {
-  try { await env.DB.prepare('UPDATE orders SET status=? WHERE idempotency_key=? AND status<>\'DELIVERED\'').bind(status, key).run(); } catch {}
-}
-async function finalizeOrder(env, key) {
-  await env.DB.prepare("UPDATE orders SET status='DELIVERED', delivered_at=? WHERE idempotency_key=? AND status<>'DELIVERED'").bind(now(), key).run();
+async function finalizeOrder(env, key, token) {
+  await env.DB.prepare("UPDATE orders SET status='DELIVERED', delivered_at=? WHERE idempotency_key=? AND status='PENDING' AND processing_token=?").bind(now(), key, token).run();
   return env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
 }
 function orderNo() {
@@ -542,61 +474,67 @@ async function listProducts(env, all = false, q = '', categoryId = '', tag = '')
   return { items: all ? items : items.map(publicProduct) };
 }
 
+async function processOrder(env, user, order, request) {
+  const key = order.idempotency_key, token = crypto.randomUUID();
+  const lock = await env.DB.prepare("UPDATE orders SET processing_token=?,processing_until=? WHERE idempotency_key=? AND status='PENDING' AND (processing_token IS NULL OR processing_until<?)")
+    .bind(token, Math.floor(Date.now() / 1000) + 300, key, Math.floor(Date.now() / 1000)).run();
+  if (!Number(lock.meta?.changes || 0)) return { finished: false, response: json({ order: orderView(order), delivered: false, message: '订单正在处理，请稍后同步' }, 202) };
+  try {
+    order = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
+    const external = Number(order.price_points) - Number(order.bonus_points_used || 0);
+    let consumed = { state: 'DONE' };
+    if (external > 0) consumed = await consumePoints(env, user, key, external, `兑换 ${order.title}`, token);
+    if (consumed.state === 'FAILED' || (consumed.state === 'ERROR' && consumed.definitive)) {
+      const changed = await refundOrder(env, key, token);
+      if (!changed) return { finished: false, response: pendingConsumption(key, '订单处理权已变更，请稍后同步').response };
+      if (changed) await invalidatePublicCache(request, ['catalog']);
+      return { finished: changed, response: consumed.response };
+    }
+    if (consumed.state !== 'DONE') return { finished: false, response: consumed.response };
+    const done = await finalizeOrder(env, key, token);
+    if (!done || done.status !== 'DELIVERED') return { finished: false, response: pendingConsumption(key, '订单处理权已变更，请稍后同步').response };
+    return { finished: true, response: json({ order: orderView(done), delivery: orderDelivery(done), delivered: true }) };
+  } catch {
+    return { finished: false, response: fail(503, '积分扣减状态未知，订单保持待确认，可在「我的已购」稍后同步', 'CONSUME_UNKNOWN') };
+  } finally {
+    await env.DB.prepare('UPDATE orders SET processing_token=NULL,processing_until=0 WHERE idempotency_key=? AND processing_token=?').bind(key, token).run().catch(() => {});
+  }
+}
+
 async function purchaseProduct(request, env, productId) {
   const user = await requireUser(request, env);
   const body = await bodyJson(request);
   const key = body.idempotency_key;
   if (!validText(key, 1, 128)) return fail(400, '购买编号无效', 'INVALID_ARGUMENT');
-
-  const p = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(productId).first();
-  if (!p) return fail(404, '商品不存在', 'PRODUCT_NOT_FOUND');
-  if (p.status !== 'ACTIVE') return fail(409, '该商品已下架', 'PRODUCT_UNAVAILABLE');
-  // 先确认支付凭证可用，避免占用了库存才发现无法扣减积分。
-  if (!await apiKeyValue(env)) return fail(503, '服务端尚未配置一人付 API Key，暂时无法兑换', 'YIRENFU_KEY_MISSING');
-
   let order = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
-  if (order) {
-    if (order.user_id !== user.id || order.product_id !== p.id) return fail(409, '购买编号已关联其他订单', 'IDEMPOTENCY_CONFLICT');
-    if (order.status === 'DELIVERED') return json({ order: orderView(order), delivery: orderDelivery(order), already_delivered: true });
-    if (order.status === 'FAILED') return fail(409, '该订单已失败，请重新发起兑换', 'ORDER_FAILED');
-  } else {
-    const reserved = await reserveStock(env, p.id);
-    if (!reserved) return fail(409, '该商品已售罄', 'OUT_OF_STOCK');
+  if (!order) {
+    const p = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(productId).first();
+    if (!p) return fail(404, '商品不存在', 'PRODUCT_NOT_FOUND');
+    if (p.status !== 'ACTIVE') return fail(409, '该商品已下架', 'PRODUCT_UNAVAILABLE');
     try {
-      await env.DB.prepare(`INSERT INTO orders(idempotency_key,order_no,user_id,product_id,title,price_points,delivery_type,delivery_text,delivery_url,file_key,file_name,status,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(key, orderNo(), user.id, p.id, p.title, p.price_points, p.delivery_type, p.delivery_text, p.delivery_url, p.file_key, p.file_name, 'PENDING', now()).run();
+      if (!await reserveOrder(env, { productId, userId: user.id, key, orderNo: orderNo() })) {
+        // The same key may have reserved the last item between the first read and this batch.
+        order = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
+        if (!order) {
+          const pending = await env.DB.prepare("SELECT idempotency_key FROM orders WHERE user_id=? AND product_id=? AND status='PENDING' LIMIT 1").bind(user.id, productId).first();
+          if (pending) return fail(409, '该商品已有待确认订单，请先在「我的已购」同步，避免重复扣分', 'ORDER_ALREADY_PENDING');
+          await invalidatePublicCache(request, ['catalog']);
+          return fail(409, '该商品已售罄或暂不可兑换', 'OUT_OF_STOCK');
+        }
+      } else {
+        await invalidatePublicCache(request, ['catalog']);
+      }
     } catch {
-      // 并发下可能已由同一次请求的另一次调用插入订单；此时库存已被对方占用，不能重复释放。
-      const again = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
-      if (!again) {
-        await releaseStock(env, p.id);
-        return fail(409, '创建订单失败，请重试', 'ORDER_CREATE_FAILED');
-      }
-      if (again.user_id !== user.id || again.product_id !== p.id) {
-        return fail(409, '购买编号已被使用', 'IDEMPOTENCY_CONFLICT');
-      }
-      order = again;
+      // A duplicate request rolls back its whole D1 transaction before reading the existing order.
+      order = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
+      if (!order) return fail(409, '创建订单失败，请重试', 'ORDER_CREATE_FAILED');
     }
     if (!order) order = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
   }
-
-  let consumed;
-  try { consumed = await consumePoints(env, user, key, p.price_points, `兑换 ${p.title}`); }
-  catch { return fail(503, '积分扣减状态未知，订单保持待确认，可在「我的已购」稍后同步', 'CONSUME_UNKNOWN'); }
-
-  // 明确失败或明确未发生扣减 → 回滚库存并结束订单。
-  if (consumed.state === 'FAILED' || (consumed.state === 'ERROR' && consumed.definitive)) {
-    await releaseStock(env, p.id);
-    await markOrder(env, key, 'FAILED');
-    return consumed.response;
-  }
-  // 结果未知 → 保留库存占用与 PENDING 订单，等待同步，绝不交付。
-  if (consumed.state === 'ERROR') return consumed.response;
-  if (consumed.state === 'PENDING') return consumed.response;
-
-  const done = await finalizeOrder(env, key);
-  return json({ order: orderView(done), delivery: orderDelivery(done), delivered: true, remaining: consumed.result?.remaining ?? consumed.access?.remaining ?? null });
+  if (order.user_id !== user.id || order.product_id !== productId) return fail(409, '购买编号已关联其他订单', 'IDEMPOTENCY_CONFLICT');
+  if (order.status === 'DELIVERED') return json({ order: orderView(order), delivery: orderDelivery(order), already_delivered: true });
+  if (order.status === 'FAILED') return fail(409, '该订单已失败，请重新发起兑换', 'ORDER_FAILED');
+  return (await processOrder(env, user, order, request)).response;
 }
 
 async function listOrders(env, user, limit = 50) {
@@ -607,23 +545,12 @@ async function listOrders(env, user, limit = 50) {
   }));
 }
 
-async function syncOrders(env, user) {
+async function syncOrders(env, user, request) {
   const rows = await env.DB.prepare("SELECT * FROM orders WHERE user_id=? AND status='PENDING' ORDER BY created_at DESC LIMIT 5").bind(user.id).all();
   let synced = 0;
-  for (const o of rows.results || []) {
-    const r = await yirenfu(env, '/consumption', 'POST', { user_id: user.id, idempotency_key: o.idempotency_key }).catch(() => null);
-    if (!r?.response.ok) continue;
-    const d = r.data;
-    if (d.status === 'SUCCEEDED' && d.confirmed === true) {
-      await saveLedger(env, o.idempotency_key, d);
-      await finalizeOrder(env, o.idempotency_key);
-      synced++;
-    } else if (['FAILED', 'CANCELED', 'REJECTED', 'EXPIRED'].includes(d.status)) {
-      await saveLedger(env, o.idempotency_key, d);
-      await releaseStock(env, o.product_id);
-      await markOrder(env, o.idempotency_key, 'FAILED');
-      synced++;
-    }
+  for (const order of rows.results || []) {
+    const result = await processOrder(env, user, order, request);
+    if (result.finished) synced++;
   }
   return synced;
 }
@@ -683,7 +610,7 @@ async function verifyWebhook(request, env, raw) {
   try { const parsed = JSON.parse(raw); return parsed.id === eventId ? parsed : false; } catch { return false; }
 }
 
-async function route(request, env) {
+async function route(request, env, ctx) {
   const url = new URL(request.url), path = url.pathname, method = request.method;
   if (method !== 'GET' && !originOk(request)) return fail(403, '请求来源校验失败', 'ORIGIN_REJECTED');
   if (path === '/api/health' && method === 'GET') {
@@ -691,19 +618,17 @@ async function route(request, env) {
     try { apiKeyConfigured = Boolean(await apiKeyValue(env)); webhookSecretConfigured = Boolean(await webhookSecretValue(env)); } catch {}
     return json({ ok: true, apiKeyConfigured, webhookSecretConfigured, storageConfigured: Boolean(env.BUCKET) });
   }
-  if (path === '/api/config' && method === 'GET') return cachedPublicJson(request, env, async () => json(await config(env)), 300);
-  if (path === '/api/product' && method === 'GET') return cachedPublicJson(request, env, async () => relayUpstream(env, '/product'), 60);
-  if (path === '/api/categories' && method === 'GET') return cachedPublicJson(request, env, async () => json(await publicCategories(env)), 60);
+  if (path === '/api/config' && method === 'GET') return cachedPublicJson(request, async () => json(await config(env)), ctx);
+  if (path === '/api/product' && method === 'GET') return cachedPublicJson(request, async () => relayUpstream(env, '/product'), ctx);
+  if (path === '/api/categories' && method === 'GET') return cachedPublicJson(request, async () => json(await publicCategories(env)), ctx);
 
   // 商品货架（公开）
-  if (path === '/api/products' && method === 'GET') return cachedPublicJson(request, env, async () => json(await listProducts(
+  if (path === '/api/products' && method === 'GET') return cachedPublicJson(request, async () => json(await listProducts(
     env, false, url.searchParams.get('q'), url.searchParams.get('category'), url.searchParams.get('tag')
-  )), 30);
+  )), ctx);
   const buyMatch = path.match(/^\/api\/products\/([A-Za-z0-9_\-]{1,64})\/purchase$/);
   if (buyMatch && method === 'POST') {
-    const response = await purchaseProduct(request, env, buyMatch[1]);
-    if (response.status === 200 || response.status === 202) await invalidatePublicCache(request);
-    return response;
+    return purchaseProduct(request, env, buyMatch[1]);
   }
 
   // 我的订单 / 已购内容
@@ -713,7 +638,7 @@ async function route(request, env) {
   }
   if (path === '/api/orders/sync' && method === 'POST') {
     const user = await requireUser(request, env);
-    const synced = await syncOrders(env, user);
+    const synced = await syncOrders(env, user, request);
     return json({ ok: true, synced, items: await listOrders(env, user) });
   }
   const dlMatch = path.match(/^\/api\/download\/([A-Za-z0-9_\-]{1,128})$/);
@@ -777,9 +702,23 @@ async function route(request, env) {
   }
   if (path === '/api/access' && method === 'GET') {
     const user = await requireUser(request, env);
-    const unavailable = await checkCapability(env, 'entitlement_query');
-    if (unavailable) return unavailable;
-    return relayUpstream(env, '/access', 'POST', { user_id: user.id });
+    const bonus = await bonusBalance(env, user.id);
+    const used = await env.DB.prepare("SELECT COALESCE(SUM(bonus_points_used),0) AS used FROM orders WHERE user_id=? AND status='DELIVERED'").bind(user.id).first();
+    const bonusUsed = Number(used?.used || 0);
+    try {
+      const unavailable = await checkCapability(env, 'entitlement_query');
+      if (unavailable) return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+      const result = await yirenfu(env, '/access', 'POST', { user_id: user.id });
+      if (!result.response.ok) return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+      const data = result.data;
+      const onepay = data.requires_consumption
+        ? (typeof data.remaining === 'number' && Number.isFinite(data.remaining) ? Math.max(0, data.remaining) : null)
+        : 0;
+      const spendable = onepay === null ? null : (data.access_granted === true ? onepay : 0);
+      return json({ ...data, bonus_points: bonus, bonus_used: bonusUsed, onepay_points: onepay, total_points: spendable === null ? null : bonus + spendable, upstream_available: true });
+    } catch {
+      return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+    }
   }
   if (path === '/api/purchase' && method === 'POST') return purchasePointsHandler(request, env);
   if (path === '/api/purchases' && method === 'GET') {
@@ -799,7 +738,7 @@ async function route(request, env) {
       const b = await bodyJson(request); const siteName = String(b.siteName || '').trim(); const description = String(b.description || '').trim();
       if (!siteName || siteName.length > 64 || !description || description.length > 240) return fail(400, '站点名称或描述长度无效', 'INVALID_ARGUMENT');
       await env.DB.batch(['siteName', 'description'].map((k, i) => env.DB.prepare('INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at').bind(k, i ? description : siteName, now())));
-      await invalidatePublicCache(request);
+      await invalidatePublicCache(request, ['site']);
       return json({ ok: true, siteName, description });
     }
 
@@ -815,7 +754,7 @@ async function route(request, env) {
       await env.DB.prepare('INSERT INTO categories(id,name,parent_id,sort_order,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
         .bind(cid, v.name, v.parent_id, v.sort_order, v.status, now(), now()).run();
       await audit(env, 'category.created', cid, `${v.name} / ${v.parent_id ? '子分类' : '顶级分类'}`);
-      await invalidatePublicCache(request);
+      await invalidatePublicCache(request, ['catalog']);
       const row = await env.DB.prepare('SELECT * FROM categories WHERE id=?').bind(cid).first();
       return json({ ok: true, category: row }, 201);
     }
@@ -833,7 +772,7 @@ async function route(request, env) {
         await env.DB.prepare('UPDATE categories SET name=?,parent_id=?,sort_order=?,status=?,updated_at=? WHERE id=?')
           .bind(v.name, v.parent_id, v.sort_order, v.status, now(), cid).run();
         await audit(env, 'category.updated', cid, `${v.name} / ${v.status}`);
-        await invalidatePublicCache(request);
+        await invalidatePublicCache(request, ['catalog']);
         const row = await env.DB.prepare('SELECT * FROM categories WHERE id=?').bind(cid).first();
         return json({ ok: true, category: row });
       }
@@ -844,7 +783,7 @@ async function route(request, env) {
         if (Number(products?.c || 0) > 0) return fail(409, '该分类下还有商品，请先调整商品分类', 'CATEGORY_HAS_PRODUCTS');
         await env.DB.prepare('DELETE FROM categories WHERE id=?').bind(cid).run();
         await audit(env, 'category.deleted', cid, existing.name);
-        await invalidatePublicCache(request);
+        await invalidatePublicCache(request, ['catalog']);
         return json({ ok: true, deleted: true });
       }
     }
@@ -861,7 +800,7 @@ async function route(request, env) {
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .bind(pid, v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), now()).run();
       await audit(env, 'goods.created', pid, `${v.title} / ${v.price_points} 积分`);
-      await invalidatePublicCache(request);
+      await invalidatePublicCache(request, ['catalog']);
       const row = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(pid).first();
       return json({ ok: true, product: row }, 201);
     }
@@ -878,21 +817,22 @@ async function route(request, env) {
         await env.DB.prepare(`UPDATE products SET title=?,summary=?,description=?,price_points=?,cover_url=?,category_id=?,tags=?,delivery_type=?,delivery_text=?,delivery_url=?,file_key=?,file_name=?,stock=?,status=?,sort_order=?,updated_at=? WHERE id=?`)
           .bind(v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), pid).run();
         await audit(env, 'goods.updated', pid, `${v.title} / ${v.status}`);
-        await invalidatePublicCache(request);
+        await invalidatePublicCache(request, ['catalog']);
         const row = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(pid).first();
         return json({ ok: true, product: row });
       }
       if (method === 'DELETE') {
-        const sold = await env.DB.prepare("SELECT COUNT(*) AS c FROM orders WHERE product_id=? AND status='DELIVERED'").bind(pid).first();
-        if (Number(sold?.c || 0) > 0) {
+        // Delete and the outstanding-order check are a single atomic statement:
+        // a concurrent reservation either wins first and keeps the product, or sees it gone.
+        const deleted = await env.DB.prepare("DELETE FROM products WHERE id=? AND NOT EXISTS (SELECT 1 FROM orders WHERE product_id=? AND status IN ('PENDING','DELIVERED'))").bind(pid, pid).run();
+        if (!Number(deleted.meta?.changes || 0)) {
           await env.DB.prepare("UPDATE products SET status='HIDDEN',updated_at=? WHERE id=?").bind(now(), pid).run();
-          await audit(env, 'goods.hidden', pid, '已售出商品仅下架，保留订单交付');
-          await invalidatePublicCache(request);
-          return json({ ok: true, hidden: true, message: '该商品已有成交订单，已改为下架以保留用户已购内容。' });
+          await audit(env, 'goods.hidden', pid, '存在待确认或已完成订单，仅下架商品');
+          await invalidatePublicCache(request, ['catalog']);
+          return json({ ok: true, hidden: true, message: '该商品有待确认或已完成订单，已改为下架以保留订单。' });
         }
-        await env.DB.prepare('DELETE FROM products WHERE id=?').bind(pid).run();
         await audit(env, 'goods.deleted', pid, existing.title);
-        await invalidatePublicCache(request);
+        await invalidatePublicCache(request, ['catalog']);
         return json({ ok: true, deleted: true });
       }
     }
@@ -945,11 +885,12 @@ async function route(request, env) {
     if (path === '/api/admin/security' && method === 'GET') return json(await secretState(env));
     if (path === '/api/admin/api-key' && method === 'POST') {
       const b = await bodyJson(request);
-      if (b.clear === true) { await delSetting(env, 'yirenfu_api_key'); await audit(env, 'admin.api_key_cleared'); return json({ ok: true, ...await secretState(env) }); }
+      if (b.clear === true) { await delSetting(env, 'yirenfu_api_key'); await audit(env, 'admin.api_key_cleared'); await invalidatePublicCache(request, ['plans']); return json({ ok: true, ...await secretState(env) }); }
       const value = typeof b.value === 'string' ? b.value.trim() : '';
       if (value.length < 8 || value.length > 200 || /\s/.test(value)) return fail(400, 'API Key 需为 8-200 位且不含空白字符', 'INVALID_ARGUMENT');
       await setSetting(env, 'yirenfu_api_key', value);
       await audit(env, 'admin.api_key_updated');
+      await invalidatePublicCache(request, ['plans']);
       return json({ ok: true, ...await secretState(env) });
     }
     if (path === '/api/admin/webhook-secret' && method === 'POST') {
@@ -967,11 +908,24 @@ async function route(request, env) {
       const rows = await env.DB.prepare('SELECT id,action,target,detail,created_at FROM admin_audit ORDER BY created_at DESC LIMIT ?').bind(limit).all();
       return json({ items: rows.results || [] });
     }
-    const userRoute = path.match(/^\/api\/admin\/users\/([A-Za-z0-9_\-]{1,64})(?:\/(reset-password|status|role))?$/);
+    const userRoute = path.match(/^\/api\/admin\/users\/([A-Za-z0-9_\-]{1,64})(?:\/(reset-password|status|role|bonus))?$/);
     if (userRoute) {
       const targetId = userRoute[1], action = userRoute[2] || '';
       const target = await env.DB.prepare('SELECT id,email,role FROM users WHERE id=?').bind(targetId).first();
       if (!target) return fail(404, '用户不存在', 'USER_NOT_FOUND');
+      if (action === 'bonus' && method === 'GET') {
+        return json({ bonus_points: await bonusBalance(env, targetId), items: await bonusHistory(env, targetId) });
+      }
+      if (action === 'bonus' && method === 'POST') {
+        const b = await bodyJson(request);
+        const delta = b.delta, reason = typeof b.reason === 'string' ? b.reason.trim() : '', key = b.idempotency_key;
+        if (!Number.isSafeInteger(delta) || !delta || Math.abs(delta) > 100000000 || !validText(reason, 1, 120) || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(key)) {
+          return fail(400, '积分调整数量、原因或操作编号无效', 'INVALID_ARGUMENT');
+        }
+        const result = await adjustBonus(env, { userId: targetId, actorId: admin.id, delta, reason, key });
+        if (!result.ok) return fail(409, result.code === 'BALANCE_LIMIT' ? '赠送积分不足或超过上限' : '操作编号已用于其他调整', result.code);
+        return json(result);
+      }
       if (action === 'role' && method === 'POST') {
         const b = await bodyJson(request);
         const role = String(b.role || '');
@@ -998,13 +952,20 @@ async function route(request, env) {
         return json({ ok: true, disabled });
       }
       if (!action && method === 'DELETE') {
-        await env.DB.batch([
-          env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId),
-          env.DB.prepare('DELETE FROM purchase_intents WHERE user_id=?').bind(targetId),
-          env.DB.prepare('DELETE FROM consumption_jobs WHERE user_id=?').bind(targetId),
-          env.DB.prepare('DELETE FROM orders WHERE user_id=?').bind(targetId),
-          env.DB.prepare('DELETE FROM users WHERE id=?').bind(targetId),
+        if (targetId === admin.id) return fail(400, '不能删除当前登录的管理员账号', 'SELF_DELETE_FORBIDDEN');
+        // All steps share the same guard and D1 batch transaction. Never discard an
+        // ambiguous upstream debit or its reserved bonus/stock while it is pending.
+        const noPending = "NOT EXISTS (SELECT 1 FROM orders WHERE user_id=? AND status='PENDING')";
+        const deleted = await env.DB.batch([
+          env.DB.prepare(`DELETE FROM sessions WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM purchase_intents WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM consumption_jobs WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM orders WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM bonus_wallets WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM users WHERE id=? AND ${noPending}`).bind(targetId, targetId),
         ]);
+        if (!Number(deleted[5]?.meta?.changes || 0)) return fail(409, '该用户有待确认订单，请先同步订单后再删除', 'USER_HAS_PENDING_ORDERS');
+        // Ledger rows are retained as an immutable reconciliation trail.
         await audit(env, 'user.deleted', targetId, target.email);
         return json({ ok: true });
       }
@@ -1056,18 +1017,18 @@ async function purchasePointsHandler(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
-      const response = await route(request, env);
+      const response = await route(request, env, ctx);
       if (response) return response;
-      if (request.method === 'GET' && env.ASSETS) {
+      if ((request.method === 'GET' || request.method === 'HEAD') && env.ASSETS) {
         const assetUrl = new URL(request.url);
         if (assetUrl.pathname === '/admin') assetUrl.pathname = '/admin.html';
         else if (assetUrl.pathname === '/shop') assetUrl.pathname = '/shop.html';
         else if (assetUrl.pathname === '/account') assetUrl.pathname = '/account.html';
         else if (assetUrl.pathname === '/') assetUrl.pathname = '/index.html';
         const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
-        return withStaticCache(assetResponse, assetUrl.pathname);
+        return withStaticCache(assetResponse, request.url);
       }
       return fail(404, 'Not Found', 'NOT_FOUND');
     } catch (e) {

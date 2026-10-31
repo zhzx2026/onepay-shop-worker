@@ -14,7 +14,7 @@
 - **商品页（`/shop`）**：独立商品目录，支持按一级分类、二级子分类、标签、关键词筛选与积分排序；父分类自动包含其子分类商品。
 - **个人中心（`/account`）**：注册 / 登录、积分余额、充值套餐、我的已购与账户信息。充值入口只放在个人中心。
 - **积分充值**：只读加载一人付当前 `/product` 可售积分套餐，点击后拿 `purchase_url` 跳转支付宝；入口状态不等于支付成功。
-- **积分兑换**：兑换时先校验余额，再用 `/consume` 幂等扣减积分，**只有 `status=SUCCEEDED && confirmed=true` 才交付内容**。
+- **积分兑换**：先使用店铺赠送积分；不足部分再用 `/consume` 幂等核销支付宝积分。涉及一人付时，**只有 `status=SUCCEEDED && confirmed=true` 才交付内容**；纯赠送积分订单无需请求一人付。
 - **我的已购**：已购内容永久保存在 D1，可随时回来查看；文本可一键复制、链接可直接打开、文件走订单专属下载地址。
 - 待确认订单可点「同步待确认订单」查询一人付 `/consumption` 原结果，不会重复扣积分。
 
@@ -29,19 +29,30 @@
   - `文件`：后台上传文件到 R2（单文件 ≤ 50MB），用户点「下载文件」时由 Worker 校验登录态与订单归属后流式返回，链接不可被他人复用、不可枚举。
 - **成交订单**：订单号、商品、用户邮箱、消耗积分、交付状态、时间。
 - 站点名称 / 说明、一人付 `/capabilities` 与 `/product` 只读联调、平台购买与核销记录、Webhook 配置与签名轮换。
-- **用户管理**：按邮箱搜索，查看身份、注册时间、最近登录、活跃会话、充值单数、已购数；支持设为管理员 / 取消管理员、重置密码、停用/启用、删除账号（同时清理其订单与核销记录）。
+- **用户管理**：按邮箱搜索，查看身份、会话、订单数和店铺赠送积分；管理员可填写原因增加或扣减赠送积分并查看流水。支持设置角色、重置密码、停用/启用和删除账号；有待确认订单的账号不能删除，删除后保留积分流水供对账。
+- **数据查看**：后台列表与卡片支持小屏幕；右上角「查看原数据」按需加载本地 Monaco（VS Code 同款编辑器），只读展示 JSON。
 - **在线修改凭证**：一人付 API Key、Webhook 签名密钥均可在后台修改，存于 D1 `settings` 表并优先于 Worker Secret；接口只返回掩码，完整密钥不回传浏览器。所有敏感操作写入 `admin_audit`。
 
-## 积分与交付的关键约束
+## 赠送积分与交付的关键约束
 
-- 兑换流程为「**先占库存 → 再扣积分 → 确认后交付**」：
-  - 积分不足 → 返回 `402 POINTS_INSUFFICIENT`，库存立即释放，不会扣分。
-  - 一人付返回 `UNKNOWN` / `PROCESSING` → 订单保持 `PENDING`，**不交付**，稍后同步；同一 `idempotency_key` 不会重复扣减。
-  - 明确失败（4xx）→ 释放库存、订单标记 `FAILED`。
-- 一人付收费方式必须是**积分 / 次数包（QUOTA）**。若仍是买断或时长包，兑换接口返回 `409 BILLING_MODE_NOT_QUOTA` 并提示去控制台切换。
-- 订单保存商品交付内容**快照**：之后修改或下架商品，不影响已购用户已获得的内容。
-- 已有成交记录的商品执行「删除」时只做下架，避免用户已购内容失效。
-- `user_id` 永远取自 Worker 已认证的 D1 用户，不接受前端指定。
+- **两本独立账**：支付宝积分由一人付管理；「店铺赠送积分」存于 D1 `bonus_wallets`，只在本店使用。后台调整的是店铺赠送积分，**不会增减支付宝余额**；余额页面分开显示两者。
+- **优先赠送积分**：兑换在 D1 事务中预留库存及可用赠送积分，不足的部分才请求一人付核销。例如商品 10 分、赠送余额 3 分时，只向一人付核销 7 分。全部由赠送积分支付时，不需要一人付 API Key。
+- **只在确认安全时交付或退还**：一人付成功须同时满足 `SUCCEEDED` 与 `confirmed=true`；提交前确认无法扣款或上游明确最终失败会原子返还赠送积分及库存。提交后超时、HTTP 错误、查询 404、`UNKNOWN` 或 `PROCESSING` 均保持待确认，**不交付、不猜测失败、不换业务编号重扣**。同一用户对同一商品已有待确认订单时不能创建新订单；用户可在「我的已购」同步原编号；若长期无法确认，需要管理员在一人付后台核对并联系平台，不能直接手工改库退款。
+- 订单处理使用带租约的独占令牌；过期请求不能提交、返还或完成被新请求接管的订单。余额调整、库存与积分流水均使用 D1 原子事务和幂等操作编号。
+- 涉及支付宝余额时，一人付收费方式必须是**积分 / 次数包（QUOTA）**；若是买断或时长包，只能使用足额赠送积分兑换。
+- 订单保存商品交付内容**快照**。商品存在待确认或已完成订单时，「删除」改为下架；用户存在待确认订单时禁止删除。
+- `user_id` 始终取自已认证的 D1 用户；管理员接口再次验证独立后台会话与角色。
+
+### 升级已有数据库
+
+**新代码依赖 `0006_bonus_points.sql`；上线前必须先迁移**，否则余额、用户列表及兑换接口会报错。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换并确保旧 Worker 已停止处理订单，然后应用迁移、部署新版本再恢复流量。未确认的旧订单保留原业务编号查询，不要重建或手工退款。
+
+```bash
+# 仅在获得正式上线授权后操作远程数据库
+npx wrangler d1 migrations apply onepay-shop --remote
+# 本地开发使用 --local，而非 --remote
+npx wrangler d1 migrations apply onepay-shop --local
+```
 
 ## 先决条件
 
@@ -59,7 +70,7 @@ npx wrangler login
 npx wrangler d1 create onepay-shop
 ```
 
-4. 应用数据库迁移（包含商品、订单、分类标签与账号角色）：
+4. 应用全部数据库迁移（包含商品、订单、账号角色与赠送积分）：
 
 ```bash
 npx wrangler d1 migrations apply onepay-shop --remote
@@ -156,7 +167,7 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 | GET | `/api/download/:orderKey` | 下载文件交付（需登录且为订单本人） |
 | GET | `/api/product` | 一人付充值套餐（只读） |
 | POST | `/api/purchase` | 创建积分充值购买入口 |
-| GET | `/api/access` | 积分余额 |
+| GET | `/api/access` | 店铺赠送及支付宝积分分项；支付宝不可用时仍返回店铺余额 |
 | POST | `/api/admin/login` | 管理员账号登录，body `{ email, password }` |
 | GET | `/api/admin/me` | 当前独立后台会话 |
 | POST | `/api/admin/logout` | 退出后台，不影响前台会话 |
@@ -165,19 +176,26 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 | POST | `/api/admin/upload` | 上传交付文件到 R2（multipart） |
 | GET | `/api/admin/orders` | 成交订单列表 |
 | POST | `/api/admin/users/:id/role` | 设置管理员角色，body `{ role: "admin" \| "user" }` |
+| GET | `/api/admin/users/:id/bonus` | 店铺赠送积分余额与最近流水 |
+| POST | `/api/admin/users/:id/bonus` | 调整赠送积分，body `{ delta, reason, idempotency_key }`；操作编号可安全重试 |
 
 ## 缓存策略
 
-- 静态页面与 `/storefront.css`、`/storefront.js`：`s-maxage=300`，浏览器端 HTML 不缓存、静态资源缓存 60 秒。
-- 公共数据接口使用 Cloudflare Cache API：
-  - `/api/products`：30 秒边缘缓存
-  - `/api/categories`：60 秒边缘缓存
-  - `/api/config`：300 秒边缘缓存
-  - `/api/product`：60 秒边缘缓存
-- 后台修改站点配置、商品或分类后会立即清除当前域名的 `/api/products`、`/api/categories`、`/api/config` 缓存；商品兑换成功后也会清除商品缓存。
-- 登录态、后台接口、订单、下载和充值接口始终 `private, no-store`，不会进入公共缓存。
-- 前台 `storefront.js` 的 API 请求使用 `cache: no-store`，避免浏览器把公共数据缓存数小时；边缘缓存仍然生效。
-- 缓存响应带 `x-cache: HIT | MISS`，静态资源带 `x-cache: ASSET`，便于排查。
+公共数据由 Cloudflare Cache API 在边缘数据中心缓存，并允许浏览器短时间复用：
+
+| 公开 GET 接口 | 边缘缓存 | 浏览器缓存 |
+| --- | --- | --- |
+| `/api/products`（含 `q`、`category`、`tag` 筛选） | 30 秒 | 5 秒 |
+| `/api/categories` | 60 秒 | 10 秒 |
+| `/api/config` | 300 秒 | 30 秒 |
+| `/api/product`（充值套餐） | 60 秒 | 10 秒 |
+
+仅成功的公开 JSON 响应进入共享缓存；包含 `Set-Cookie` 或 `Vary` 的公开 JSON 响应及错误响应不共享。登录态、余额、订单、交付、充值及后台接口保持 `private, no-store`。缓存异常时自动回源，不影响已经完成的业务写入。
+
+- 后台修改商品、分类，或兑换过程中预留、回滚、同步释放库存，会使**处理该写入请求的同一域名、同一数据中心**内的商品和分类缓存失效，包括不同筛选条件；站点配置及套餐缓存分别独立失效。浏览器已有的短缓存不会被主动清除，兑换完成或失败后商店会强制刷新库存。若缓存失效操作失败，旧数据仍会随 TTL 过期。
+- Cloudflare Cache API 的缓存按数据中心隔离，不是全球同步失效：其他域名或数据中心的旧数据要等对应的边缘 TTL 到期；浏览器若刚取到旧数据，还可能多保留其浏览器 TTL。可用请求头 `Cache-Control: no-cache` 强制回源并刷新当前数据中心的缓存。实际库存和积分仍由服务端在兑换时校验。
+- 前台 HTML 外壳浏览器缓存 30 秒、共享缓存最多 60 秒，后台 HTML `private, no-store`。带 `?v=` 版本号的 CSS/JS 缓存 24 小时并标记 `immutable`，其他公开静态资源缓存 1 小时。**修改 CSS/JS 时应同步更新引用它的 HTML 中的版本号**，避免浏览器继续使用旧资源；HTML 更新可能受共享及浏览器缓存时间影响。
+- 可缓存的公开 JSON 响应的 `x-cache` 标记为 `HIT`、`MISS`、`REFRESH` 或 `BYPASS`；静态资源标记为 `ASSET`。缓存写入异步完成，刚刚首次请求之后的并发请求也可能暂时显示 `MISS`。
 
 ## 安全行为
 
@@ -188,3 +206,8 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 - 文件下载走 `/api/download/:orderKey`，校验会话 + 订单归属，R2 桶无需公开。
 - 通知只表示权益 / 核销变化，不作为付款成功信号；事件按 ID 去重。
 - 不在日志输出请求凭证、Webhook secret、密码或完整用户请求内容。
+
+## 开发与测试
+
+- `npm run dev` / `npm run deploy` 会先运行 `npm run build:editor`，使用 `scripts/admin-editor.js` 与 esbuild 构建本地 Monaco 只读编辑器至 `public/vendor/monaco/`；静态文件随应用发布，不依赖第三方 CDN。编辑器文件及字体、工作线程发生变化时应更新引用版本号。Monaco 遵循其目录下的 MIT 许可证。
+- `npm test` 运行回归测试；涉及真实 SQLite 事务、并发和恢复的积分测试需要 Node.js 22+ 内置 `node:sqlite`（Node 20 下这部分会跳过）。`npm run check` 检查脚本语法。

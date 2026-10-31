@@ -23,6 +23,7 @@ function makeStore({ config = {}, auth = {} } = {}) {
     window: {},
     location: { search: '' },
     URLSearchParams,
+    FormData,
     HTMLImageElement,
     fetch: async (path, options) => {
       requests.push({ path, options });
@@ -104,11 +105,15 @@ test('inline scripts in all pages parse successfully', async () => {
 });
 
 
-test('storefront API requests bypass the browser cache', async () => {
+test('only public GET requests use the browser cache and explicit refresh bypasses it', async () => {
   const { store, requests } = makeStore();
-  await store.api('/api/products');
-  assert.equal(requests[0].path, '/api/products');
-  assert.equal(requests[0].options.cache, 'no-store');
+  await store.api('/api/products?category=design');
+  await store.api('/api/categories');
+  await store.api('/api/auth/me');
+  await store.api('/api/orders', { cache: 'force-cache' });
+  await store.api('/api/products', { cache: 'no-store' });
+  await store.api('/api/products/one/purchase', { method: 'POST', body: '{}' });
+  assert.deepEqual(requests.map(item => item.options.cache), ['default', 'default', 'no-store', 'no-store', 'no-store', 'no-store']);
 });
 
 test('storefront pages use matching versioned CSS and JavaScript assets', async () => {

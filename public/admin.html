@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f8f7fc">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261030-2">
+<link rel="stylesheet" href="/admin.css?v=20261031-2">
 </head>
 <body>
 
@@ -36,7 +36,7 @@
     <div class="nav-caption">MENU <span>·</span> 工作台</div>
     <nav class="nav" aria-label="管理导航">
       <button class="active" aria-current="page" onclick="tab('overview',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span class="nav-label">概览</span></button>
-      <button onclick="tab('goods',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 8h16l-1 11H5L4 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/></svg></span><span class="nav-label">商品管理</span></button>
+      <button id="goodsNav" onclick="tab('goods',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 8h16l-1 11H5L4 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/></svg></span><span class="nav-label">商品管理</span></button>
       <button onclick="tab('categories',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Z"/><path d="M8 12h8M8 15h5"/></svg></span><span class="nav-label">分类管理</span></button>
       <button onclick="tab('orders',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 3.5h12v17l-3-2-3 2-3-2-3 2v-17Z"/><path d="M9 8h6M9 12h6"/></svg></span><span class="nav-label">成交订单</span></button>
       <button onclick="tab('site',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.4 3.5 5.1 3.5 8S14.5 17.6 12 20c-2.5-2.4-3.5-5.1-3.5-8S9.5 6.4 12 4Z"/></svg></span><span class="nav-label">站点配置</span></button>
@@ -72,15 +72,15 @@
         </div>
       </div>
       <div class="cols">
-        <div class="panel"><h2>能力边界</h2><p class="sub">按平台当前能力显示，不调用未开放交易功能。</p><div id="capabilities" class="state">尚未读取</div></div>
-        <div class="panel"><h2>充值套餐摘要</h2><p class="sub">价格、收费方式和 SKU 均实时来自 /product。</p><div id="product" class="state">尚未读取</div></div>
+        <div class="panel"><div class="panel-title"><h2>能力边界</h2><button class="raw-trigger" data-raw-for="capabilities" onclick="openRaw('capabilities')" disabled>查看原数据 ↗</button></div><p class="sub">按平台当前能力显示，不调用未开放交易功能。</p><div id="capabilities" class="state">尚未读取</div></div>
+        <div class="panel"><div class="panel-title"><h2>充值套餐摘要</h2><button class="raw-trigger" data-raw-for="product" onclick="openRaw('product')" disabled>查看原数据 ↗</button></div><p class="sub">价格、收费方式和 SKU 均实时来自 /product。</p><div id="product" class="state">尚未读取</div></div>
       </div>
     </section>
 
     <!-- 商品管理 -->
     <section class="view hidden" id="view-goods">
       <div class="panel">
-        <h2>上架商品</h2>
+        <div class="panel-title"><h2>上架商品</h2><button class="raw-trigger" data-raw-for="goodsOut" onclick="openRaw('goodsOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">用户用积分兑换商品。交付内容支持三种：文本（如卡密、提取码）、链接（如网盘分享链接）、文件（上传到 R2，用户下载需登录且仅本人可下）。</p>
         <div class="actions toolbar" style="margin:0 0 14px">
           <input id="goodsQuery" class="searchbox" placeholder="按名称搜索" maxlength="64" onkeydown="if(event.key==='Enter')loadGoods()">
@@ -154,7 +154,7 @@
     <!-- 分类管理 -->
     <section class="view hidden" id="view-categories">
       <div class="panel">
-        <h2>商品分类</h2>
+        <div class="panel-title"><h2>商品分类</h2><button class="raw-trigger" data-raw-for="categoriesOut" onclick="openRaw('categoriesOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">支持一级分类与二级子分类。前台商品页会按分类树筛选，父分类会包含其所有子分类下的商品。</p>
         <div class="actions toolbar" style="margin:0 0 14px">
           <div class="state" style="flex:1;min-width:220px">最多两级；分类下有子分类或商品时不能直接删除，可先调整或下架。</div>
@@ -183,7 +183,7 @@
     <!-- 成交订单 -->
     <section class="view hidden" id="view-orders">
       <div class="panel">
-        <h2>成交订单</h2>
+        <div class="panel-title"><h2>成交订单</h2><button class="raw-trigger" data-raw-for="ordersOut" onclick="openRaw('ordersOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">积分兑换记录。仅「已交付」的订单会展示交付内容；订单交付内容为快照，修改商品不会影响已购用户。</p>
         <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadOrders()">刷新订单</button></div>
         <div id="ordersOut"><div class="state">正在加载订单…</div></div>
@@ -204,35 +204,35 @@
     <!-- 充值套餐 -->
     <section class="view hidden" id="view-plans">
       <div class="panel">
-        <h2>一人付充值套餐</h2>
+        <div class="panel-title"><h2>一人付充值套餐</h2><button class="raw-trigger" data-raw-for="plansOut" onclick="openRaw('plansOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">此处只读联调；积分套餐、价格与收费方式请在一人付项目控制台配置（收费方式需为积分 / 次数包）。</p>
         <div class="actions" style="margin:0 0 14px">
           <button class="btn" onclick="loadCapabilities()">只读查询能力</button>
           <button class="btn secondary" onclick="loadProduct()">只读查询产品</button>
           <a class="btn secondary" href="https://ai6666.com/opcpay/console/" target="_blank" rel="noopener" style="text-decoration:none">打开一人付控制台 ↗</a>
         </div>
-        <div id="plansOut" class="data">点击「只读查询产品」。</div>
+        <div id="plansOut" class="state">点击「只读查询产品」。</div>
       </div>
     </section>
 
     <!-- 平台记录 -->
     <section class="view hidden" id="view-records">
       <div class="panel">
-        <h2>购买与核销记录</h2>
+        <div class="panel-title"><h2>购买与核销记录</h2><button class="raw-trigger" data-raw-for="recordsOut" onclick="openRaw('recordsOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">从平台列表读取记录；购买入口状态不等于支付成功。</p>
         <div class="actions" style="margin:0 0 12px">
           <button class="btn" onclick="loadRecords('purchases')">购买入口记录</button>
           <button class="btn secondary" onclick="loadRecords('consumptions')">正式核销记录</button>
           <button class="btn secondary" onclick="loadRecords('events')">通知投递记录</button>
         </div>
-        <pre class="data" id="recordsOut">尚未查询</pre>
+        <div class="state" id="recordsOut">尚未查询</div>
       </div>
     </section>
 
     <!-- 用户管理 -->
     <section class="view hidden" id="view-users">
       <div class="panel">
-        <h2>用户管理</h2>
+        <div class="panel-title"><h2>用户管理</h2><button class="raw-trigger" data-raw-for="usersOut" onclick="openRaw('usersOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">前台注册的邮箱账号。管理员是账号上的独立角色，与后台会话绑定；密码只以 PBKDF2 哈希存储，后台不可查看，只能重置。变更角色、停用或重置密码会立即让该用户所有会话失效。</p>
         <div class="actions" style="margin:0 0 12px">
           <input id="userQuery" class="searchbox" placeholder="按邮箱搜索" maxlength="64" onkeydown="if(event.key==='Enter')loadUsers(0)">
@@ -247,7 +247,7 @@
     <!-- 通知 -->
     <section class="view hidden" id="view-webhook">
       <div class="panel">
-        <h2>权益通知配置</h2>
+        <div class="panel-title"><h2>权益通知配置</h2><button class="raw-trigger" data-raw-for="webhookState" onclick="openRaw('webhookState')" disabled>查看原数据 ↗</button></div>
         <p class="sub">接收地址固定为当前 Worker 域名下的 /api/webhook；停用会暂停平台投递。</p>
         <div class="state" id="webhookState">尚未读取</div>
         <div class="actions" style="margin-top:12px">
@@ -288,15 +288,32 @@
         <div class="state" id="hookStateBox" style="margin-top:12px">—</div>
       </div>
       <div class="panel">
-        <h2>操作审计</h2>
+        <div class="panel-title"><h2>操作审计</h2><button class="raw-trigger" data-raw-for="auditOut" onclick="openRaw('auditOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">记录管理员敏感操作，最多显示最近 30 条。</p>
         <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadAudit()">刷新</button></div>
-        <pre class="data" id="auditOut">尚未加载</pre>
+        <div class="state" id="auditOut">尚未加载</div>
       </div>
     </section>
   </main>
 </div>
 
+<div class="dialog-backdrop hidden" id="bonusDialog" role="dialog" aria-modal="true" aria-labelledby="bonusTitle">
+  <div class="dialog-card bonus-dialog">
+    <div class="dialog-head"><div><span class="dialog-kicker">STORE CREDITS</span><h2 id="bonusTitle">调整赠送积分</h2></div><button class="dialog-close" onclick="closeDialog('bonusDialog')" aria-label="关闭">×</button></div>
+    <p class="dialog-copy" id="bonusUser">—</p>
+    <div class="bonus-balance"><span>当前店铺赠送积分</span><strong id="bonusBalance">—</strong><small>仅调整店铺赠送积分，不会修改支付宝余额。兑换优先使用赠送积分。</small></div>
+    <div class="cols"><div class="field"><label for="bonusDirection">调整方式</label><select id="bonusDirection"><option value="1">增加赠送积分</option><option value="-1">扣减赠送积分</option></select></div><div class="field"><label for="bonusAmount">积分数量</label><input id="bonusAmount" type="number" min="1" max="100000000" step="1" inputmode="numeric" placeholder="输入正整数"></div></div>
+    <div class="field"><label for="bonusReason">调整原因</label><input id="bonusReason" maxlength="120" placeholder="例如：活动奖励、人工纠正"></div>
+    <div class="actions"><button class="btn" onclick="submitBonus(this)">确认调整</button><button class="btn secondary" onclick="closeDialog('bonusDialog')">取消</button></div>
+    <h3 class="history-title">最近变动</h3><div id="bonusHistory" class="state">正在读取…</div>
+  </div>
+</div>
+<div class="dialog-backdrop hidden" id="rawDialog" role="dialog" aria-modal="true" aria-labelledby="rawTitle">
+  <div class="dialog-card raw-dialog">
+    <div class="dialog-head"><div><span class="dialog-kicker">READ ONLY · JSON</span><h2 id="rawTitle">查看原数据</h2></div><button class="dialog-close" onclick="closeDialog('rawDialog')" aria-label="关闭">×</button></div>
+    <div class="code-window"><div class="code-toolbar"><span class="code-dots"><i></i><i></i><i></i></span><span>response.json</span><span class="code-readonly">只读</span></div><div id="rawEditor" class="raw-editor" aria-label="原始 JSON 数据"></div></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -318,7 +335,7 @@ async function withBusy(button, task) {
   }
 }
 async function api(path, o = {}) {
-  const r = await fetch(path, { ...o, headers: { 'content-type': 'application/json', ...(o.headers || {}) } });
+  const r = await fetch(path, { ...o, cache: 'no-store', headers: { 'content-type': 'application/json', ...(o.headers || {}) } });
   let d = {}; try { d = await r.json(); } catch {}
   if (!r.ok) throw Object.assign(new Error(d.error || '请求失败'), { data: d, status: r.status });
   return d;
@@ -334,7 +351,7 @@ async function login(e) {
       await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ email: $('#adminEmail').value, password: $('#adminPassword').value }) });
       $('#adminPassword').value = '';
       $('#loginWrap').classList.add('hidden'); $('#app').classList.remove('hidden');
-      await loadStatus(); await loadSite(); await loadCategories(); await loadGoods();
+      await loadStatus(); await loadSite(); await loadCategories(); await loadGoods(); openRequestedEdit();
     } catch (err) { $('#loginError').classList.add('bad'); $('#loginError').textContent = err.message; }
   });
 }
@@ -343,7 +360,7 @@ async function boot() {
     const x = await api('/api/admin/me');
     if (x.authenticated && x.user.role === 'admin') {
       $('#loginWrap').classList.add('hidden'); $('#app').classList.remove('hidden');
-      await loadStatus(); await loadSite(); await loadCategories(); await loadGoods();
+      await loadStatus(); await loadSite(); await loadCategories(); await loadGoods(); openRequestedEdit();
     }
   } catch {}
 }
@@ -389,7 +406,73 @@ async function saveSite(button) {
     try { await api('/api/admin/config', { method: 'PUT', body: JSON.stringify({ siteName: $('#siteName').value, description: $('#description').value }) }); toast('站点展示配置已保存'); } catch (e) { toast(e.message); }
   });
 }
-function pretty(node, data) { node.textContent = JSON.stringify(data, null, 2); }
+const RAW = new Map();
+const FIELD_NAMES = {
+  items: '记录', capabilities: '接口能力', charging_options: '可售套餐', product_name: '产品名称', billing_mode: '收费方式',
+  quota_unit: '额度单位', quota_amount: '积分数量', display_name: '套餐名称', price: '价格', currency: '币种', status: '状态',
+  capability_status: '服务状态', user_id: '用户编号', idempotency_key: '业务编号', created_at: '创建时间', updated_at: '更新时间',
+  response: '处理结果', amount: '数量', reason: '说明', event_type: '事件类型', enabled: '是否启用', url: '接收地址',
+  request_id: '请求编号', error: '错误说明', error_code: '错误代码', has_more: '还有更多', next_before_id: '下一页编号',
+  action: '操作', target: '对象', detail: '详情', actor_id: '操作人', delta: '积分变动', balance_after: '变动后余额',
+  entitlement_query: '权益查询', consumption: '积分核销', purchase_request_list: '购买记录', consumption_list: '核销记录', webhooks: '通知能力',
+};
+const STATUS_NAMES = { ENABLED: '已启用', ACTIVE: '正常', SUCCEEDED: '成功', READY: '入口已生成', PENDING: '待确认', PROCESSING: '处理中', UNKNOWN: '待确认', FAILED: '失败', DISABLED: '未启用', NOT_CONFIGURED: '未配置', QUANTITY: '积分 / 次数包', POINT: '积分', COUNT: '次数' };
+function rememberRaw(id, data) {
+  RAW.set(id, data);
+  document.querySelectorAll('[data-raw-for="' + id + '"]').forEach(button => { button.disabled = false; });
+}
+function visualValue(value, depth = 0) {
+  if (value === null || value === undefined || value === '') return '<span class="value-muted">—</span>';
+  if (typeof value === 'boolean') return `<span class="pill ${value ? 'ok' : 'off'}">${value ? '是 / 已开放' : '否 / 未开放'}</span>`;
+  if (typeof value !== 'object') return `<span class="visual-value">${esc(STATUS_NAMES[value] || value)}</span>`;
+  if (depth > 3) return '<span class="value-muted">更多内容见原数据</span>';
+  if (Array.isArray(value)) {
+    if (!value.length) return '<div class="visual-empty">暂无记录</div>';
+    return `<div class="visual-list">${value.map((item, index) => `<div class="visual-card"><div class="visual-card-index">${String(index + 1).padStart(2, '0')}</div>${visualValue(item, depth + 1)}</div>`).join('')}</div>`;
+  }
+  const entries = Object.entries(value);
+  if (!entries.length) return '<div class="visual-empty">暂无数据</div>';
+  const simple = entries.filter(([, item]) => item === null || typeof item !== 'object');
+  const nested = entries.filter(([, item]) => item !== null && typeof item === 'object');
+  return `${simple.length ? `<div class="visual-grid">${simple.map(([key, item]) => `<div class="visual-field"><span class="visual-label">${esc(FIELD_NAMES[key] || key.replaceAll('_', ' '))}</span>${visualValue(item, depth + 1)}</div>`).join('')}</div>` : ''}${nested.map(([key, item]) => `<div class="visual-section"><div class="visual-section-label">${esc(FIELD_NAMES[key] || key.replaceAll('_', ' '))}</div>${visualValue(item, depth + 1)}</div>`).join('')}`;
+}
+function pretty(node, data) {
+  rememberRaw(node.id, data);
+  node.className = 'visual-data';
+  node.innerHTML = visualValue(data);
+}
+let rawEditor = null, editorModule;
+async function openRaw(id) {
+  if (!RAW.has(id)) return;
+  const modal = $('#rawDialog'), host = $('#rawEditor');
+  modal.classList.remove('hidden'); document.body.classList.add('dialog-open');
+  const value = JSON.stringify(RAW.get(id), null, 2);
+  if (rawEditor) { rawEditor.dispose(); rawEditor = null; }
+  host.innerHTML = '<div class="editor-loading">正在加载编辑器…</div>';
+  try {
+    if (!document.getElementById('monacoStyles')) { const link = document.createElement('link'); link.id = 'monacoStyles'; link.rel = 'stylesheet'; link.href = '/vendor/monaco/admin-editor.css?v=20261031-2'; document.head.appendChild(link); }
+    editorModule ||= import('/vendor/monaco/admin-editor.js?v=20261031-2');
+    const { createRawEditor } = await editorModule;
+    if (modal.classList.contains('hidden')) return;
+    host.innerHTML = ''; rawEditor = createRawEditor(host, value); rawEditor.focus();
+  } catch {
+    host.innerHTML = ''; const fallback = document.createElement('textarea'); fallback.className = 'raw-fallback'; fallback.readOnly = true; fallback.value = value; host.appendChild(fallback);
+  }
+}
+function closeDialog(id) {
+  if (id === 'bonusDialog' && bonusPending) { toast('上次操作结果未知，请用原内容重试'); return; }
+  $('#' + id).classList.add('hidden');
+  if (id === 'rawDialog' && rawEditor) { rawEditor.dispose(); rawEditor = null; }
+  if (!document.querySelector('.dialog-backdrop:not(.hidden)')) document.body.classList.remove('dialog-open');
+}
+document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeDialog('rawDialog'); closeDialog('bonusDialog'); } });
+function openRequestedEdit() {
+  const requested = new URLSearchParams(location.search).get('edit');
+  if (!requested || !/^[A-Za-z0-9_-]{1,64}$/.test(requested)) return;
+  tab('goods', $('#goodsNav'));
+  if (GOODS[requested]) editGoods(requested); else toast('未找到该商品，请在商品管理中搜索');
+  history.replaceState(null, '', '/admin');
+}
 async function loadCapabilities() {
   try { const d = await api('/api/admin/capabilities'); pretty($('#capabilities'), d); pretty($('#plansOut'), d); toast('已只读读取 /capabilities'); }
   catch (e) { pretty($('#capabilities'), e.data || { error: e.message }); toast(e.message); }
@@ -441,12 +524,12 @@ function renderCategories() {
     return;
   }
   $('#categoriesOut').innerHTML = `<table><thead><tr><th>分类</th><th>商品数</th><th>状态</th><th>排序</th><th>操作</th></tr></thead><tbody>${rows.map(c => `<tr>
-    <td><div class="cat-name ${c.depth ? 'child' : ''}">${esc(c.name)}</div></td>
-    <td>${Number(c.product_count || 0)}</td>
-    <td>${c.status === 'ACTIVE' ? '<span class="pill ok">启用</span>' : '<span class="pill off">隐藏</span>'}</td>
-    <td>${Number(c.sort_order || 0)}</td>
-    <td>
-      <button class="rowbtn" onclick="editCategory('${c.id}')">编辑</button>
+    <td data-label="分类"><div class="cat-name ${c.depth ? 'child' : ''}">${esc(c.name)}</div></td>
+    <td data-label="商品数">${Number(c.product_count || 0)}</td>
+    <td data-label="状态">${c.status === 'ACTIVE' ? '<span class="pill ok">启用</span>' : '<span class="pill off">隐藏</span>'}</td>
+    <td data-label="排序">${Number(c.sort_order || 0)}</td>
+    <td class="row-actions" data-label="操作">
+      <button class="rowbtn primary-row" onclick="editCategory('${c.id}')">编辑</button>
       <button class="rowbtn" onclick="newCategory('${c.id}')">添加子分类</button>
       <button class="rowbtn danger" onclick="deleteCategory('${c.id}')">删除</button>
     </td>
@@ -456,6 +539,7 @@ async function loadCategories(button) {
   return withBusy(button, async () => {
     try {
       const d = await api('/api/admin/categories');
+      rememberRaw('categoriesOut', d);
       CATEGORIES = d.items || [];
       renderCategoryOptions();
       renderCategories();
@@ -512,6 +596,7 @@ async function loadGoods(button) {
   const q = ($('#goodsQuery') || {}).value || '';
   try {
     const d = await api('/api/admin/products?q=' + encodeURIComponent(q.trim()));
+    rememberRaw('goodsOut', d);
     GOODS = {}; (d.items || []).forEach(p => GOODS[p.id] = p);
     renderGoods(d.items || []);
   } catch (e) { $('#goodsOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
@@ -530,14 +615,14 @@ function renderGoods(items) {
       const thumb = p.cover_url ? `<img class="thumb" src="${esc(p.cover_url)}" alt="">` : `<div class="thumb"></div>`;
       const tags = Array.isArray(p.tags) ? p.tags : [];
       return `<tr>
-        <td><div style="display:flex;gap:10px;align-items:center">${thumb}<div><b>${esc(p.title)}</b><div class="mono">${esc(categoryName(p.category_id))}${p.summary ? ' · ' + esc(p.summary) : ''}</div>${tags.length ? `<div class="cat-tags">${tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div></div></td>
-        <td><b>${Number(p.price_points)}</b></td>
-        <td>${esc(typeLabel)}</td>
-        <td>${esc(stock)}</td>
-        <td>${Number(p.sold_count || 0)}</td>
-        <td>${p.status === 'ACTIVE' ? '<span class="pill ok">上架</span>' : '<span class="pill off">下架</span>'}</td>
-        <td>
-          <button class="rowbtn" onclick="editGoods('${p.id}')">编辑</button>
+        <td data-label="商品"><div style="display:flex;gap:10px;align-items:center">${thumb}<div><b>${esc(p.title)}</b><div class="mono">${esc(categoryName(p.category_id))}${p.summary ? ' · ' + esc(p.summary) : ''}</div>${tags.length ? `<div class="cat-tags">${tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div></div></td>
+        <td data-label="积分价"><b>${Number(p.price_points)}</b></td>
+        <td data-label="交付">${esc(typeLabel)}</td>
+        <td data-label="库存">${esc(stock)}</td>
+        <td data-label="已售">${Number(p.sold_count || 0)}</td>
+        <td data-label="状态">${p.status === 'ACTIVE' ? '<span class="pill ok">上架</span>' : '<span class="pill off">下架</span>'}</td>
+        <td class="row-actions" data-label="操作">
+          <button class="rowbtn primary-row" onclick="editGoods('${p.id}')">编辑</button>
           <button class="rowbtn" onclick="toggleGoods('${p.id}')">${p.status === 'ACTIVE' ? '下架' : '上架'}</button>
           <button class="rowbtn danger" onclick="deleteGoods('${p.id}')">删除</button>
         </td>
@@ -649,17 +734,18 @@ async function deleteGoods(id) {
 async function loadOrders() {
   try {
     const d = await api('/api/admin/orders?limit=50');
+    rememberRaw('ordersOut', d);
     ORDERS = d.items || [];
     if (!ORDERS.length) { $('#ordersOut').innerHTML = '<div class="state">还没有成交订单。</div>'; return; }
     $('#ordersOut').innerHTML = `<table><thead><tr>
       <th>订单号</th><th>商品</th><th>用户</th><th>积分</th><th>状态</th><th>时间</th>
     </tr></thead><tbody>${ORDERS.map(o => `<tr>
-      <td class="mono">${esc(o.order_no)}</td>
-      <td>${esc(o.title)}</td>
-      <td class="mono">${esc(o.email || o.user_id)}</td>
-      <td><b>${Number(o.price_points)}</b></td>
-      <td>${o.status === 'DELIVERED' ? '<span class="pill ok">已交付</span>' : o.status === 'PENDING' ? '<span class="pill wait">待确认</span>' : '<span class="pill bad">失败</span>'}</td>
-      <td>${esc(fmt(o.created_at))}</td>
+      <td class="mono" data-label="订单号">${esc(o.order_no)}</td>
+      <td data-label="商品">${esc(o.title)}</td>
+      <td class="mono" data-label="用户">${esc(o.email || o.user_id)}</td>
+      <td data-label="积分"><b>${Number(o.price_points)}</b></td>
+      <td data-label="状态">${o.status === 'DELIVERED' ? '<span class="pill ok">已交付</span>' : o.status === 'PENDING' ? '<span class="pill wait">待确认</span>' : '<span class="pill bad">失败</span>'}</td>
+      <td data-label="时间">${esc(fmt(o.created_at))}</td>
     </tr>`).join('')}</tbody></table>`;
   } catch (e) { $('#ordersOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
 }
@@ -673,20 +759,70 @@ async function loadUsers(offset) {
   catch (e) { $('#usersMeta').textContent = e.message; toast(e.message); }
 }
 function renderUsers(d) {
+  rememberRaw('usersOut', d);
   USERS = {}; d.items.forEach(u => USERS[u.id] = u);
   $('#usersMeta').textContent = `共 ${d.total} 个账号 · 当前显示 ${d.items.length} 个`;
   if (!d.items.length) { $('#usersOut').innerHTML = '<div class="state">没有匹配的账号</div>'; return; }
-  $('#usersOut').innerHTML = `<table><thead><tr><th>邮箱 / ID</th><th>身份</th><th>状态</th><th>会话</th><th>充值单</th><th>已购</th><th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${d.items.map(u => `<tr>
-    <td><b>${esc(u.email)}</b><div class="mono">${esc(u.id)}</div></td>
-    <td>${u.role === 'admin' ? '<span class="pill ok">管理员</span>' : '<span class="pill off">普通用户</span>'}</td>
-    <td>${u.disabled ? '<span class="pill off">已停用</span>' : '<span class="pill ok">正常</span>'}</td>
-    <td>${u.sessions}</td><td>${u.purchases}</td><td>${u.orders}</td>
-    <td>${esc(fmt(u.created_at))}</td><td>${esc(fmt(u.last_login_at))}</td>
-    <td><button class="rowbtn" onclick="toggleUserRole('${u.id}','${u.role || 'user'}')">${u.role === 'admin' ? '取消管理员' : '设为管理员'}</button>
+  $('#usersOut').innerHTML = `<table><thead><tr><th>邮箱 / ID</th><th>身份</th><th>状态</th><th>赠送积分</th><th>会话</th><th>充值单</th><th>已购</th><th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${d.items.map(u => `<tr>
+    <td data-label="用户"><b>${esc(u.email)}</b><div class="mono">${esc(u.id)}</div></td>
+    <td data-label="身份">${u.role === 'admin' ? '<span class="pill ok">管理员</span>' : '<span class="pill off">普通用户</span>'}</td>
+    <td data-label="状态">${u.disabled ? '<span class="pill off">已停用</span>' : '<span class="pill ok">正常</span>'}</td>
+    <td data-label="赠送积分"><b>${Number(u.bonus_points || 0)}</b></td><td data-label="会话">${u.sessions}</td><td data-label="充值单">${u.purchases}</td><td data-label="已购">${u.orders}</td>
+    <td data-label="注册时间">${esc(fmt(u.created_at))}</td><td data-label="最近登录">${esc(fmt(u.last_login_at))}</td>
+    <td class="row-actions"><button class="rowbtn primary-row" onclick="openBonus('${u.id}')">调整赠送积分</button><button class="rowbtn" onclick="toggleUserRole('${u.id}','${u.role || 'user'}')">${u.role === 'admin' ? '取消管理员' : '设为管理员'}</button>
       <button class="rowbtn" onclick="resetPassword('${u.id}')">重置密码</button>
       <button class="rowbtn" onclick="toggleUser('${u.id}',${u.disabled ? 0 : 1})">${u.disabled ? '启用' : '停用'}</button>
       <button class="rowbtn danger" onclick="deleteUser('${u.id}')">删除</button></td>
   </tr>`).join('')}</tbody></table>`;
+}
+let bonusTarget = null, bonusPending = null;
+async function openBonus(id) {
+  const user = USERS[id]; if (!user) return;
+  if (bonusPending) return toast('请先确认上次积分调整的结果');
+  bonusTarget = id; bonusPending = null;
+  $('#bonusTitle').textContent = '调整赠送积分'; $('#bonusUser').textContent = user.email;
+  $('#bonusAmount').value = ''; $('#bonusReason').value = ''; $('#bonusDirection').value = '1';
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('onepay:admin-bonus:' + id) || 'null');
+    const previous = saved && JSON.parse(saved.snapshot);
+    if (previous?.user === id && typeof saved.key === 'string') {
+      bonusPending = saved;
+      $('#bonusAmount').value = Math.abs(previous.delta); $('#bonusDirection').value = previous.delta < 0 ? '-1' : '1'; $('#bonusReason').value = previous.reason;
+      toast('存在未确认的调整，请使用原内容重试');
+    }
+  } catch {}
+  $('#bonusDialog').classList.remove('hidden'); document.body.classList.add('dialog-open');
+  await loadBonus();
+}
+async function loadBonus() {
+  if (!bonusTarget) return;
+  try {
+    const data = await api('/api/admin/users/' + encodeURIComponent(bonusTarget) + '/bonus');
+    $('#bonusBalance').textContent = Number(data.bonus_points || 0).toLocaleString('zh-CN');
+    $('#bonusHistory').className = 'bonus-history';
+    $('#bonusHistory').innerHTML = data.items.length ? data.items.map(item => `<div class="bonus-history-row"><div><b>${esc(item.reason || (item.kind === 'reserve' ? '兑换预留' : '兑换返还'))}</b><small>${esc(fmt(item.created_at))} · 余额 ${Number(item.balance_after)}</small></div><strong class="${item.delta > 0 ? 'plus' : 'minus'}">${item.delta > 0 ? '+' : ''}${Number(item.delta)}</strong></div>`).join('') : '<div class="visual-empty">暂无变动记录</div>';
+  } catch (e) { $('#bonusHistory').textContent = e.message; toast(e.message); }
+}
+async function submitBonus(button) {
+  if (!bonusTarget) return;
+  const amount = Number($('#bonusAmount').value), reason = $('#bonusReason').value.trim();
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 100000000 || !reason || reason.length > 120) return toast('请填写有效的积分数量和调整原因');
+  const delta = amount * Number($('#bonusDirection').value), snapshot = JSON.stringify({ user: bonusTarget, delta, reason });
+  if (bonusPending && bonusPending.snapshot !== snapshot) return toast('上次操作状态未知，请用原内容重试以避免重复调整');
+  if (!bonusPending && !confirm(`确认${delta > 0 ? '增加' : '扣减'} ${amount} 店铺赠送积分？\n支付宝余额不会改变。`)) return;
+  bonusPending ||= { snapshot, key: crypto.randomUUID() };
+  try { sessionStorage.setItem('onepay:admin-bonus:' + bonusTarget, JSON.stringify(bonusPending)); } catch {}
+  return withBusy(button, async () => {
+    try {
+      await api('/api/admin/users/' + encodeURIComponent(bonusTarget) + '/bonus', { method: 'POST', body: JSON.stringify({ delta, reason, idempotency_key: bonusPending.key }) });
+      try { sessionStorage.removeItem('onepay:admin-bonus:' + bonusTarget); } catch {}
+      bonusPending = null; $('#bonusAmount').value = ''; $('#bonusReason').value = '';
+      toast('赠送积分已调整'); await Promise.all([loadBonus(), loadUsers()]);
+    } catch (e) {
+      if (e.status && e.status < 500) { try { sessionStorage.removeItem('onepay:admin-bonus:' + bonusTarget); } catch {} bonusPending = null; }
+      toast(e.status ? e.message : '结果暂不确定，请使用原内容重试');
+    }
+  });
 }
 async function toggleUserRole(id, role) {
   const u = USERS[id]; if (!u) return;
@@ -711,7 +847,7 @@ async function toggleUser(id, disabled) {
 }
 async function deleteUser(id) {
   const u = USERS[id]; if (!u) return;
-  if (!confirm('删除账号 ' + u.email + ' 及其充值 / 订单记录？此操作不可撤销。')) return;
+  if (!confirm('删除账号 ' + u.email + ' 及其充值 / 订单记录、剩余店铺赠送积分？此操作不可撤销；有待确认订单时不能删除。')) return;
   if (!confirm('再次确认删除 ' + u.email + ' ？')) return;
   try { await api('/api/admin/users/' + encodeURIComponent(id), { method: 'DELETE' }); toast('账号已删除'); loadUsers(); } catch (e) { toast(e.message); }
 }
@@ -746,8 +882,8 @@ async function clearSecret(kind) {
   try { renderSecurity(await api('/api/admin/' + kind, { method: 'POST', body: JSON.stringify({ clear: true }) })); toast('已清除，回退 Worker Secret'); loadStatus(); } catch (e) { toast(e.message); }
 }
 async function loadAudit() {
-  try { const d = await api('/api/admin/audit?limit=30'); $('#auditOut').textContent = d.items.length ? d.items.map(i => `${fmt(i.created_at)}  ${i.action}${i.target ? '  ' + i.target : ''}${i.detail ? '  ' + i.detail : ''}`).join('\n') : '暂无记录'; }
-  catch (e) { $('#auditOut').textContent = e.message; }
+  try { pretty($('#auditOut'), await api('/api/admin/audit?limit=30')); }
+  catch (e) { pretty($('#auditOut'), e.data || { error: e.message }); }
 }
 boot();
 </script>
