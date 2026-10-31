@@ -128,12 +128,12 @@
 
           <div id="fieldLink" class="field hidden">
             <label>交付链接 *</label>
-            <input id="pLink" maxlength="2000" placeholder="https://pan.quark.cn/s/… 或 https://pan.baidu.com/s/1…" oninput="updateProviderHint()" onchange="onShareLinkChanged()">
+            <input id="pLink" maxlength="2000" placeholder="https://pan.quark.cn/s/… 或 https://pan.baidu.com/s/1…" oninput="onShareLinkInput()" onchange="onShareLinkChanged()">
             <span class="hint">交付链接仅在兑换后可见。夸克、百度公开分享会自动识别来源与标签。</span>
             <div class="assist-box catalog-editor">
               <div class="assist-heading"><span class="assist-icon">▤</span><span><b>购买前的资源目录</b><small id="providerHint">粘贴网盘链接，尝试自动读取目录</small></span></div>
               <div class="assist-content">
-                <div class="catalog-tools"><div class="field"><label for="pShareCode">提取码（可选，仅用于读取）</label><input id="pShareCode" type="password" maxlength="16" autocomplete="off" placeholder="如分享需要提取码"></div><button type="button" class="btn secondary" id="readCatalogButton" onclick="fetchCatalog(this)">读取网盘目录</button></div>
+                <div class="catalog-tools"><div class="field"><label for="pShareCode">提取码（可选，仅用于读取）</label><input id="pShareCode" type="password" maxlength="16" autocomplete="off" placeholder="如分享需要提取码" oninput="onShareCodeChanged()"></div><button type="button" class="btn secondary" id="readCatalogButton" onclick="fetchCatalog(this)">读取网盘目录</button></div>
                 <div class="hint" id="catalogStatus" aria-live="polite">链接变更后会尝试自动读取；受登录、风控限制时可手动填写。</div>
                 <div class="field"><label for="pPreview">公开目录（每行一项，文件夹以 / 结尾）</label><textarea id="pPreview" rows="5" maxlength="30000" placeholder="课程资料/&#10;课程资料/第一讲.mp4&#10;使用说明.pdf" oninput="markCatalogManual()"></textarea></div>
                 <span class="hint">目录将公开展示，请勿填写链接、提取码或其他私密内容；最多 150 项。上面的提取码只用于读取，不会单独交付；若买家需要，可将 ?pwd=提取码附在交付链接中。</span>
@@ -648,26 +648,50 @@ function renderGoods(items) {
     }).join('')}</tbody></table>`;
 }
 let catalogSource = 'manual', catalogTruncated = false, lastShareLink = '', catalogSerial = 0, editorSerial = 0, generatedCoverUrl = '';
-let catalogPending = null, activeCatalogRequests = 0;
+let catalogPending = null, catalogAbort = null;
+function setCatalogBusy(busy) {
+  const control = $('#readCatalogButton');
+  control.disabled = busy;
+  control.classList.toggle('is-loading', busy);
+  if (busy) control.setAttribute('aria-busy', 'true'); else control.removeAttribute('aria-busy');
+}
+function invalidateCatalogRequest() {
+  catalogSerial++; catalogPending = null;
+  if (catalogAbort) catalogAbort.abort();
+  catalogAbort = null; setCatalogBusy(false);
+}
 function updateProviderHint() {
   const link = $('#pLink').value.trim();
   let label = '';
   try {
     const u = new URL(link);
-    if (u.protocol === 'https:' && u.hostname === 'pan.quark.cn' && /^\/s\/[A-Za-z0-9_-]+\/?$/.test(u.pathname)) label = '夸克网盘';
-    if (u.protocol === 'https:' && u.hostname === 'pan.baidu.com' && /^\/s\/1[A-Za-z0-9_-]+\/?$/.test(u.pathname)) label = '百度网盘';
+    const valid = u.protocol === 'https:' && !u.username && !u.password && !u.port;
+    if (valid && ['pan.quark.cn', 'drive.quark.cn'].includes(u.hostname) && /^\/s\/[A-Za-z0-9_-]{1,100}\/?$/.test(u.pathname)) label = '夸克网盘';
+    if (valid && u.hostname === 'pan.baidu.com' && /^\/s\/1[A-Za-z0-9_-]{1,99}\/?$/.test(u.pathname)) label = '百度网盘';
   } catch {}
   $('#providerHint').textContent = label ? `已识别 ${label} · 保存时自动添加平台标签` : '粘贴夸克或百度网盘公开分享链接';
   return label;
 }
 function markCatalogManual() {
-  catalogSerial++; catalogPending = null; catalogSource = 'manual'; catalogTruncated = false;
+  invalidateCatalogRequest(); catalogSource = 'manual'; catalogTruncated = false;
   $('#catalogStatus').textContent = '手动编辑的目录会在保存商品后公开展示。';
+}
+function onShareCodeChanged() {
+  invalidateCatalogRequest();
+  $('#catalogStatus').textContent = '提取码已变更，请点击「读取网盘目录」重试。';
+}
+function onShareLinkInput() {
+  updateProviderHint();
+  if ($('#pLink').value.trim() !== lastShareLink) {
+    invalidateCatalogRequest();
+    $('#pPreview').value = ''; catalogSource = 'manual'; catalogTruncated = false;
+    $('#catalogStatus').textContent = '链接已变更，离开输入框后尝试读取。';
+  }
 }
 function onShareLinkChanged() {
   const link = $('#pLink').value.trim();
   if (link !== lastShareLink) {
-    lastShareLink = link; catalogSerial++; catalogPending = null;
+    lastShareLink = link; invalidateCatalogRequest();
     $('#pPreview').value = ''; catalogSource = 'manual'; catalogTruncated = false;
     $('#catalogStatus').textContent = '链接已变更，旧目录已清空。';
     if (updateProviderHint()) fetchCatalog($('#readCatalogButton'));
@@ -676,25 +700,25 @@ function onShareLinkChanged() {
 function fetchCatalog(button) {
   const link = $('#pLink').value.trim();
   if (!updateProviderHint()) { $('#catalogStatus').textContent = '请先填写受支持的夸克或百度分享链接，也可手动填写目录。'; return Promise.resolve(); }
-  const serial = ++catalogSerial, editor = editorSerial, control = button || $('#readCatalogButton');
+  invalidateCatalogRequest();
+  const serial = catalogSerial, editor = editorSerial, controller = new AbortController();
+  catalogAbort = controller;
   $('#catalogStatus').textContent = '正在尝试读取公开目录…';
-  activeCatalogRequests++; control.disabled = true; control.classList.add('is-loading'); control.setAttribute('aria-busy', 'true');
-  // New links may start a new request while an old one is still in flight.
-  // Serial fencing prevents either a stale response or a late response from
-  // overwriting a manually edited catalog.
+  setCatalogBusy(true);
+  // Only the latest request can update the form or release its busy state.
+  // Changing a link, passcode or manually editing the list invalidates it.
   const operation = (async () => {
     try {
-      const data = await api('/api/admin/netdisk/preview', { method: 'POST', body: JSON.stringify({ url: link, passcode: $('#pShareCode').value }) });
+      const data = await api('/api/admin/netdisk/preview', { method: 'POST', signal: controller.signal, body: JSON.stringify({ url: link, passcode: $('#pShareCode').value }) });
       if (serial !== catalogSerial || editor !== editorSerial || $('#pLink').value.trim() !== link) return;
       if (!data.items?.length) { $('#catalogStatus').textContent = '未读取到文件；可检查分享或手动填写目录。'; return; }
       $('#pPreview').value = data.items.join('\n');
       catalogSource = data.provider?.id || 'manual'; catalogTruncated = Boolean(data.truncated);
-      $('#catalogStatus').textContent = `已读取 ${data.items.length} 项${data.truncated ? '（仅部分目录）' : ''}。请检查后保存商品。`;
+      $('#catalogStatus').textContent = `已读取 ${data.items.length} 项${data.truncated ? '（仅部分目录）' : ''}。${data.warning?.message || '请检查后保存商品。'}`;
     } catch (error) {
-      if (serial === catalogSerial && editor === editorSerial) $('#catalogStatus').textContent = error.message + ' 可手动填写。';
+      if (serial === catalogSerial && editor === editorSerial && $('#pLink').value.trim() === link) $('#catalogStatus').textContent = error.message;
     } finally {
-      activeCatalogRequests--;
-      if (!activeCatalogRequests) { control.disabled = false; control.classList.remove('is-loading'); control.removeAttribute('aria-busy'); }
+      if (serial === catalogSerial && editor === editorSerial) { catalogAbort = null; setCatalogBusy(false); }
     }
   })();
   catalogPending = operation;
@@ -723,7 +747,7 @@ function applyGeneratedCover() {
   toast('已填入封面地址，保存商品后生效');
 }
 function resetAssistFields() {
-  editorSerial++; catalogSerial++; catalogPending = null; generatedCoverUrl = '';
+  editorSerial++; invalidateCatalogRequest(); generatedCoverUrl = '';
   $('#pShareCode').value = ''; $('#pCoverPrompt').value = '';
   $('#generatedCover').classList.add('hidden'); $('#generatedCoverImage').removeAttribute('src');
 }
@@ -793,8 +817,15 @@ async function uploadFile(input) {
 async function saveGoods(button) {
   return withBusy(button, async () => {
   const editor = editorSerial;
-  if ($('#pType').value === 'LINK' && $('#pLink').value.trim() !== lastShareLink) onShareLinkChanged();
-  if (catalogPending) await catalogPending;
+  // The link or passcode can change while an earlier read is in flight. Wait
+  // for the latest request, not just the one that existed when Save was hit.
+  while (editor === editorSerial) {
+    if ($('#pType').value === 'LINK' && $('#pLink').value.trim() !== lastShareLink) onShareLinkChanged();
+    const pending = catalogPending;
+    if (!pending) break;
+    await pending;
+    if (catalogPending === pending) catalogPending = null;
+  }
   if (editor !== editorSerial) return;
   const payload = {
     title: $('#pTitle').value,

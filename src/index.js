@@ -925,7 +925,9 @@ async function route(request, env, ctx) {
     if (path === '/api/admin/netdisk/preview' && method === 'POST') {
       const body = await bodyJson(request);
       try { return json({ ok: true, ...await readShareDirectory(body.url, body.passcode) }); }
-      catch (error) { return fail(422, error.message, 'NETDISK_PREVIEW_UNAVAILABLE'); }
+      catch (error) {
+        return json({ error: error.message, error_code: 'NETDISK_PREVIEW_UNAVAILABLE', ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}) }, 422);
+      }
     }
 
     // 商品管理

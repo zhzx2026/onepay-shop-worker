@@ -394,3 +394,52 @@ sqliteTest('AI covers require an admin, use the explicit model and only expose g
   const audit = DB.raw.prepare("SELECT detail FROM admin_audit WHERE action='goods.cover_generated'").get();
   assert.equal(String(audit.detail).includes(body.prompt), false);
 });
+
+sqliteTest('admin directory diagnostics are private, authenticated and contain no share secrets', async t => {
+  const DB = await makeDb(), env = { DB }, oldFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = oldFetch; DB.raw.close(); });
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => {
+    upstreamCalls++;
+    return new Response(JSON.stringify({ code: 31001, message: 'privateId A1b2 my-secret' }), { status: 403 });
+  };
+  const body = { url: 'https://pan.quark.cn/s/privateId?pwd=A1b2' };
+  const blocked = await worker.fetch(request('/api/admin/netdisk/preview', { method: 'POST', body }), env);
+  assert.equal(blocked.status, 401);
+  assert.equal(upstreamCalls, 0);
+  const result = await worker.fetch(request('/api/admin/netdisk/preview', { admin: true, method: 'POST', body }), env);
+  assert.equal(result.status, 422);
+  assert.equal(result.headers.get('cache-control'), 'private, no-store');
+  const json = await result.json();
+  assert.equal(json.error_code, 'NETDISK_PREVIEW_UNAVAILABLE');
+  assert.deepEqual(json.diagnostic, { provider: 'quark', stage: 'TOKEN', reason: 'HTTP_ERROR', http_status: 403, provider_code: 31001 });
+  assert.equal(upstreamCalls, 4); // two Skill guest hosts and two legacy token hosts
+  for (const secret of ['privateId', 'A1b2', 'my-secret']) assert.ok(!JSON.stringify(json).includes(secret));
+});
+
+sqliteTest('admin preview consumes a mocked Skill-style root and child without leaking upstream identifiers', async t => {
+  const DB = await makeDb(), env = { DB }, oldFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = oldFetch; DB.raw.close(); });
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    const parsed = new URL(url); calls.push(parsed.pathname);
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers.cookie, undefined);
+    if (parsed.pathname.endsWith('/v2/detail')) {
+      assert.equal(JSON.parse(options.body).passcode, 'A1b2');
+      return new Response(JSON.stringify({ status: 200, code: 0, data: { token_info: { stoken: 'temporary-stoken' }, detail_info: { list: [{ file_name: '目录', fid: 'hidden-folder', file_type: 0 }] } } }));
+    }
+    assert.equal(parsed.searchParams.get('pdir_fid'), 'hidden-folder');
+    return new Response(JSON.stringify({ status: 200, code: 0, data: { list: [{ file_name: '文件.pdf', fid: 'hidden-file', file_type: 1 }] } }));
+  };
+  const result = await worker.fetch(request('/api/admin/netdisk/preview', {
+    admin: true, method: 'POST', body: { url: 'https://pan.quark.cn/s/privateId?pwd=A1b2' },
+  }), env);
+  assert.equal(result.status, 200);
+  assert.equal(result.headers.get('cache-control'), 'private, no-store');
+  const json = await result.json();
+  assert.deepEqual(json.items, ['目录/', '目录/文件.pdf']);
+  assert.equal(json.truncated, false);
+  assert.equal(calls.length, 2);
+  for (const secret of ['privateId', 'A1b2', 'temporary-stoken', 'hidden-folder', 'hidden-file']) assert.ok(!JSON.stringify(json).includes(secret));
+});
