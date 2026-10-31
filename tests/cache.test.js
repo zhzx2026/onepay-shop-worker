@@ -189,7 +189,7 @@ test('static shells and versioned assets have bounded caching; admin and cookies
 
 test('private Worker endpoints never access the shared cache, and static HEAD is supported', async t => {
   const cache = installCache(t);
-  for (const path of ['/api/auth/me', '/api/orders', '/api/access', '/api/admin/status', '/api/download/example']) {
+  for (const path of ['/api/auth/me', '/api/orders', '/api/access', '/api/library', '/api/subscriptions', '/api/subscriptions/p_test/updates', '/api/subscriptions/p_test/updates/u_test/file', '/api/admin/status', '/api/download/example']) {
     const response = await worker.fetch(request(path), {});
     assert.match(response.headers.get('cache-control'), /private, no-store/, path);
   }

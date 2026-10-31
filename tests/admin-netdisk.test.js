@@ -25,7 +25,8 @@ function makeEditor() {
   const nodes = {};
   for (const id of ['pLink', 'pShareCode', 'pPreview', 'catalogStatus', 'providerHint', 'readCatalogButton',
     'pId', 'pTitle', 'pSummary', 'pDesc', 'pPrice', 'pCover', 'pCategory', 'pTags', 'pType', 'pText',
-    'pFileKey', 'pFileName', 'pStock', 'pStatus', 'pSort']) nodes[id] = makeNode();
+    'pFileKey', 'pFileName', 'pStock', 'pStatus', 'pSort', 'pKind', 'pRepeat', 'pSubMode', 'pSubDays', 'pFrequency', 'pSeriesPreview', 'pCatalogPartial', 'pSeriesPartial']) nodes[id] = makeNode();
+  Object.assign(nodes.pKind, { value: 'SINGLE' });
   Object.assign(nodes.pType, { value: 'LINK' });
   Object.assign(nodes.pTitle, { value: '测试商品' });
   Object.assign(nodes.pPrice, { value: '10' });
@@ -136,4 +137,17 @@ test('frontend recognizes only the same safe share URLs as the server', () => {
     editor.nodes.pLink.value = link;
     assert.equal(editor.context.updateProviderHint(), '');
   }
+});
+
+test('manually editing a partial directory retains the partial warning until explicitly cleared', async () => {
+  const editor = makeEditor(); begin(editor);
+  editor.reads[0].resolve({ provider: { id: 'quark' }, items: ['文件夹/', '文件夹/文件.txt'], truncated: true });
+  await flush();
+  assert.equal(editor.nodes.pCatalogPartial.checked, true);
+  editor.nodes.pPreview.value += '\n补充文件.txt'; editor.context.markCatalogManual();
+  await editor.context.saveGoods({});
+  assert.equal(editor.saves[0].preview_truncated, true);
+  editor.nodes.pCatalogPartial.checked = false; editor.context.onCatalogPartialChanged();
+  await editor.context.saveGoods({});
+  assert.equal(editor.saves[1].preview_truncated, false);
 });

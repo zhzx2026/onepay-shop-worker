@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>个人中心 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-3">
+<link rel="stylesheet" href="/storefront.css?v=20261031-5">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -75,13 +75,14 @@
     <div class="stats">
       <div class="stat"><span>当前积分 <i>✳</i></span><b id="statPoints">—</b><small id="pointsBreakdown">正在读取积分来源</small></div>
       <div class="stat"><span>已使用积分 <i>↗</i></span><b id="statUsed">—</b><small>累计兑换所用积分</small></div>
-      <div class="stat"><span>已购内容 <i>♡</i></span><b id="statOrders">—</b><small>保存在你的账户中</small></div>
+      <div class="stat"><span>已购记录 <i>♡</i></span><b id="statOrders">—</b><small>最近 50 笔中的已交付订单</small></div>
     </div>
 
     <div>
       <div class="account-tabs" role="tablist">
         <button class="account-tab active" id="tab-recharge" role="tab" aria-selected="true" aria-controls="panel-recharge" tabindex="0" data-account-tab="recharge">充值积分</button>
         <button class="account-tab" id="tab-orders" role="tab" aria-selected="false" aria-controls="panel-orders" tabindex="-1" data-account-tab="orders">我的已购</button>
+        <button class="account-tab" id="tab-subscriptions" role="tab" aria-selected="false" aria-controls="panel-subscriptions" tabindex="-1" data-account-tab="subscriptions">我的订阅</button>
         <button class="account-tab" id="tab-profile" role="tab" aria-selected="false" aria-controls="panel-profile" tabindex="-1" data-account-tab="profile">账户信息</button>
       </div>
 
@@ -99,13 +100,22 @@
       <div class="account-panel hidden" id="panel-orders" role="tabpanel" aria-labelledby="tab-orders">
         <div class="panel-box">
           <div class="panel-head">
-            <div><h3>我的已购</h3><p>兑换成功后的文本、链接和文件都会保存在这里。</p></div>
+            <div><div class="panel-eyebrow">YOUR COLLECTION</div><h3>我的已购</h3><p>交付内容安全保存在账户中，点击卡片查看，可继续加载历史记录。</p></div>
             <div class="actions">
               <button class="sbtn sm" onclick="syncOrders(this)">同步待确认订单</button>
               <button class="sbtn sm" onclick="loadOrders(this)">刷新</button>
             </div>
           </div>
           <div class="order-list" id="orderList"><div class="empty-state">正在加载已购内容…</div></div>
+          <button class="sbtn block hidden" style="margin-top:12px" type="button" id="ordersMore" onclick="loadOrders(this, true)">加载更多记录 ↓</button>
+        </div>
+      </div>
+
+      <div class="account-panel hidden" id="panel-subscriptions" role="tabpanel" aria-labelledby="tab-subscriptions">
+        <div class="panel-box subscription-panel">
+          <div class="panel-head"><div><div class="panel-eyebrow">YOUR SERIES</div><h3>我的订阅</h3><p>有效期内可查看历史及最新更新，到期后可手动续订。</p></div><button class="sbtn sm" onclick="loadSubscriptions(this)">刷新订阅</button></div>
+          <div class="subscription-list" id="subscriptionList"><div class="empty-state">正在读取订阅…</div></div>
+          <div class="subscription-notice">订阅不会自动扣费。站内访问会在到期后停止；已下载文件或已复制的外部链接无法由本站收回。</div>
         </div>
       </div>
 
@@ -154,16 +164,28 @@
 <div class="modal" id="deliveryModal" role="dialog" aria-modal="true" aria-labelledby="deliveryTitle">
   <div class="modal-dialog">
     <button class="modal-close" aria-label="关闭" onclick="Store.setModal('#deliveryModal', false)">×</button>
-    <h2 id="deliveryTitle">兑换成功</h2>
-    <p id="deliverySub">内容已保存到「我的已购」。</p>
+    <div class="modal-kicker">YOUR COLLECTION <span>✳</span></div>
+    <h2 id="deliveryTitle">已购内容</h2>
+    <p id="deliverySub">内容已保存到你的账户。</p>
     <div id="deliveryBody"></div>
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-3"></script>
+<div class="modal" id="seriesModal" role="dialog" aria-modal="true" aria-labelledby="seriesTitle">
+  <div class="modal-dialog series-dialog">
+    <button class="modal-close" aria-label="关闭系列更新" onclick="Store.setModal('#seriesModal', false)">×</button>
+    <div class="modal-kicker">THE SERIES <span>↻</span></div><h2 id="seriesTitle">系列更新</h2><p id="seriesMeta"></p>
+    <div id="seriesList" class="series-list" aria-live="polite"></div>
+    <button class="sbtn block hidden" type="button" id="seriesMore" onclick="loadSeriesPage(this)">加载更多更新 ↓</button>
+  </div>
+</div>
+
+<script src="/storefront.js?v=20261031-5"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
 let me = null, points = null, authMode = 'login';
+let orderItems = [], orderNext = 0, orderSerial = 0, subscriptions = [], requestedProduct = query().get('product') || '';
+let seriesTarget = '', seriesOffset = 0, seriesSerial = 0, seriesExpiryTimer = null;
 const nextUrl = (() => {
   const next = query().get('next') || '';
   return next.startsWith('/') && !next.startsWith('//') ? next : '';
@@ -180,11 +202,12 @@ function showDashboard() {
   $('#authView').classList.add('hidden');
   $('#dashboard').classList.remove('hidden');
   renderProfile();
-  const tab = ['recharge', 'orders', 'profile'].includes(query().get('tab')) ? query().get('tab') : 'recharge';
+  const tab = ['recharge', 'orders', 'subscriptions', 'profile'].includes(query().get('tab')) ? query().get('tab') : 'recharge';
   switchTab(tab, false);
   loadAccess();
   loadPlans();
   loadOrders();
+  loadSubscriptions();
 }
 
 function renderProfile() {
@@ -311,44 +334,117 @@ function closePayAndRefresh() {
   loadAccess();
 }
 
-async function loadOrders(button) {
+async function loadOrders(button, append = false) {
+  const serial = ++orderSerial, offset = append ? orderNext : 0;
   return withBusy(button, async () => {
     try {
-      const data = await api('/api/orders');
-      const items = data.items || [];
-      $('#statOrders').textContent = items.filter(order => order.status === 'DELIVERED').length;
-      // Clear only this exact settled operation, never a newer pending purchase.
-      for (const order of items) if (order.status !== 'PENDING') {
-        try { const key = `onepay:pending:${me.id}:${order.product_id}`; if (sessionStorage.getItem(key) === order.key) sessionStorage.removeItem(key); } catch {}
+      const data = await api('/api/orders?offset=' + offset);
+      if (serial !== orderSerial) return;
+      const freshItems = data.items || [];
+      if (!append) $('#statOrders').textContent = freshItems.filter(order => order.status === 'DELIVERED').length;
+      const seen = new Set(append ? orderItems.map(order => order.key) : []);
+      orderItems = append ? [...orderItems, ...freshItems.filter(order => !seen.has(order.key))] : freshItems;
+      orderNext = data.next_offset; $('#ordersMore').classList.toggle('hidden', !data.has_more);
+      // Clear only the matching settled operation, never a newer pending purchase.
+      for (const order of freshItems) if (order.status !== 'PENDING') {
+        try { const key = `onepay:pending:${me.id}:${order.product_id}`; if (sessionStorage.getItem(key) === order.key) { sessionStorage.removeItem(key); sessionStorage.removeItem(key + ':quote'); } } catch {}
       }
-      if (!items.length) {
-        $('#orderList').innerHTML = '<div class="empty-state"><b>还没有已购内容</b>去商品页挑一件需要的吧。<div class="actions" style="justify-content:center;margin-top:12px"><a class="sbtn sm primary" href="/shop">浏览商品</a></div></div>';
+      if (!orderItems.length) {
+        $('#orderList').innerHTML = '<div class="empty-state collection-empty"><span aria-hidden="true">✳</span><b>你的收藏夹还是空的</b>去探索一件喜欢的数字好物吧。<div class="actions" style="justify-content:center;margin-top:16px"><a class="sbtn sm primary" href="/shop">探索商品 ↗</a></div></div>';
         return;
       }
-      $('#orderList').innerHTML = items.map(order => {
+      $('#orderList').innerHTML = orderItems.map(order => {
         const pill = order.status === 'DELIVERED' ? '<span class="status-pill ok">已交付</span>'
-          : order.status === 'PENDING' ? '<span class="status-pill wait">待确认</span>' : '<span class="status-pill bad">失败</span>';
-        return `<article class="order-card">
-          <div class="order-top">
-            <div><h4>${esc(order.title)}</h4><div class="order-meta">${esc(order.order_no)} · ${Number(order.price_points)} 积分 · ${esc(fmtTime(order.created_at))}</div><div class="order-meta">${order.status === 'FAILED' ? '兑换未完成，预留赠送积分已退回' : `${order.status === 'PENDING' ? '预留' : '积分来源'}：赠送 ${Number(order.bonus_points_used || 0)} · 支付宝 ${Number(order.onepay_points_used || 0)}${order.status === 'PENDING' ? '（待确认）' : ''}`}</div></div>
-            ${pill}
-          </div>
-          ${order.status === 'PENDING' ? '<div class="delivery-block"><div class="order-meta">扣减结果尚未确认，点击「同步待确认订单」查询，不会重复扣积分。</div></div>' : deliveryHtml(order.delivery)}
-        </article>`;
+          : order.status === 'PENDING' ? '<span class="status-pill wait">待确认</span>' : '<span class="status-pill bad">未完成</span>';
+        const type = order.product_kind === 'SUBSCRIPTION' ? '系列订阅' : ({ TEXT: '文本内容', LINK: '资源链接', FILE: '文件内容' })[order.delivery_type] || '数字内容';
+        const icon = order.product_kind === 'SUBSCRIPTION' ? '↻' : ({ TEXT: '✧', LINK: '↗', FILE: '▤' })[order.delivery_type] || '✦';
+        const detail = order.status === 'PENDING' ? '扣减待确认，请同步订单；不会重复扣积分' : order.status === 'FAILED' ? '兑换未完成，预留赠送积分已退回' : `赠送 ${Number(order.bonus_points_used || 0)} · 支付宝 ${Number(order.onepay_points_used || 0)}`;
+        return `<article class="collection-card"><div class="collection-icon" aria-hidden="true">${icon}</div><div class="collection-content"><div class="collection-heading"><div><span class="collection-type">${esc(type)}</span><h4>${esc(order.title)}</h4></div>${pill}</div><div class="collection-meta"><span>${esc(fmtTime(order.created_at))}</span><span>${Number(order.price_points)} 积分</span><span>${esc(detail)}</span></div><div class="collection-bottom"><span>订单 ${esc(order.order_no)}</span>${order.status === 'DELIVERED' ? `<button class="sbtn sm soft" data-open-order="${esc(order.key)}">查看内容 ↗</button>` : ''}</div></div></article>`;
       }).join('');
     } catch (error) {
-      $('#orderList').innerHTML = `<div class="empty-state">${esc(error.message)}</div>`;
+      if (serial !== orderSerial) return;
+      if (append) toast(error.message);
+      else { $('#orderList').innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; $('#ordersMore').classList.add('hidden'); }
     }
   });
 }
+function showOrder(key) {
+  const order = orderItems.find(item => item.key === key && item.status === 'DELIVERED'); if (!order) return;
+  $('#deliveryTitle').textContent = order.title;
+  $('#deliverySub').textContent = `${fmtTime(order.created_at)} · ${order.price_points} 积分 · 订单 ${order.order_no}`;
+  $('#deliveryBody').innerHTML = deliveryHtml(order.delivery) || '<div class="notice-line">暂无交付内容，请联系管理员。</div>';
+  setModal('#deliveryModal', true, '.modal-close');
+}
+$('#orderList').addEventListener('click', event => {
+  const button = event.target.closest('[data-open-order]'); if (button) showOrder(button.dataset.openOrder);
+});
 
+const subActive = sub => Boolean(sub && (sub.permanent || new Date(sub.expires_at).getTime() > Date.now()));
+async function loadSubscriptions(button) {
+  return withBusy(button, async () => {
+    try {
+      const data = await api('/api/subscriptions'); subscriptions = data.items || [];
+      if (!subscriptions.length) $('#subscriptionList').innerHTML = '<div class="empty-state collection-empty"><span aria-hidden="true">↻</span><b>还没有订阅系列</b>订阅后，更新内容都会在这里等你。<div class="actions" style="justify-content:center;margin-top:16px"><a class="sbtn sm primary" href="/shop">发现系列 ↗</a></div></div>';
+      else $('#subscriptionList').innerHTML = subscriptions.map(sub => {
+        const active = subActive(sub), status = sub.permanent ? '永久有效' : active ? '订阅有效' : '已到期';
+        const until = sub.permanent ? '永久查看系列更新' : (active ? '有效期至 ' : '已于 ') + fmtTime(sub.expires_at) + (active ? '' : ' 到期');
+        const renew = sub.status === 'ACTIVE' && !sub.permanent ? `<a class="sbtn sm" href="/shop?q=${encodeURIComponent(sub.title)}">${active ? '手动续订' : '重新订阅'} ↗</a>` : '';
+        return `<article class="subscription-card"><div class="subscription-icon" aria-hidden="true">↻</div><div class="subscription-content"><div class="collection-heading"><div><span class="collection-type">SERIES COLLECTION</span><h4>${esc(sub.title)}</h4></div><span class="status-pill ${active ? 'ok' : 'bad'}">${status}</span></div><p>${esc(until)}</p><div class="subscription-actions">${active ? `<button class="sbtn sm primary" data-open-series="${esc(sub.product_id)}">查看系列更新 ↗</button>` : '<span class="subscription-expired">续订后可继续查看历史及新增更新</span>'}${renew}${sub.status !== 'ACTIVE' && !sub.permanent ? '<span class="subscription-expired">商品已下架，暂无法续订</span>' : ''}</div></div></article>`;
+      }).join('');
+      if (requestedProduct) {
+        const wanted = requestedProduct; requestedProduct = '';
+        if (subscriptions.some(sub => sub.product_id === wanted && subActive(sub))) openSeries(wanted);
+      }
+    } catch (error) { $('#subscriptionList').innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; }
+  });
+}
+$('#subscriptionList').addEventListener('click', event => {
+  const button = event.target.closest('[data-open-series]'); if (button) openSeries(button.dataset.openSeries);
+});
+function clearSeries() {
+  seriesSerial++; seriesTarget = ''; seriesOffset = 0; clearTimeout(seriesExpiryTimer); seriesExpiryTimer = null;
+  $('#seriesList').innerHTML = ''; $('#seriesMore').classList.add('hidden');
+}
+$('#seriesModal')._onClose = clearSeries;
+function watchSeriesExpiry(sub) {
+  if (sub.permanent) return;
+  const delay = new Date(sub.expires_at).getTime() - Date.now();
+  if (delay <= 0) { seriesSerial++; $('#seriesList').innerHTML = '<div class="empty-state">订阅已到期，续订后可继续查看。</div>'; $('#seriesMore').classList.add('hidden'); loadSubscriptions(); return; }
+  seriesExpiryTimer = setTimeout(() => watchSeriesExpiry(sub), Math.min(delay + 50, 2147483647));
+}
+function openSeries(id) {
+  const sub = subscriptions.find(item => item.product_id === id);
+  if (!subActive(sub)) { toast('订阅已到期，请先手动续订'); loadSubscriptions(); return; }
+  clearSeries(); seriesTarget = id;
+  $('#seriesTitle').textContent = sub.title; $('#seriesMeta').textContent = sub.permanent ? '永久订阅 · 历史与新增更新' : '有效期至 ' + fmtTime(sub.expires_at);
+  $('#seriesList').innerHTML = '<div class="empty-state">正在读取系列更新…</div>';
+  setModal('#seriesModal', true, '.modal-close'); watchSeriesExpiry(sub); loadSeriesPage();
+}
+async function loadSeriesPage(button) {
+  if (!seriesTarget) return;
+  const target = seriesTarget, serial = ++seriesSerial, offset = seriesOffset;
+  return withBusy(button, async () => {
+    try {
+      const data = await api('/api/subscriptions/' + encodeURIComponent(target) + '/updates?offset=' + offset);
+      if (target !== seriesTarget || serial !== seriesSerial) return;
+      const html = (data.items || []).map(item => `<article class="series-entry"><div class="series-entry-head"><span class="series-entry-mark" aria-hidden="true">✦</span><div><h3>${esc(item.title)}</h3><small>${esc(fmtTime(item.created_at))}</small></div></div>${item.summary ? `<p>${esc(item.summary)}</p>` : ''}${deliveryHtml(item.delivery)}</article>`).join('');
+      if (!offset) $('#seriesList').innerHTML = html || '<div class="empty-state"><b>还没有发布更新</b>内容发布后会出现在这里。</div>';
+      else $('#seriesList').insertAdjacentHTML('beforeend', html);
+      seriesOffset = data.next_offset; $('#seriesMore').classList.toggle('hidden', !data.has_more);
+    } catch (error) {
+      if (target !== seriesTarget || serial !== seriesSerial) return;
+      if (error.status === 403 || error.status === 404) { $('#seriesList').innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; $('#seriesMore').classList.add('hidden'); loadSubscriptions(); }
+      else if (!offset) $('#seriesList').innerHTML = `<div class="empty-state">${esc(error.message)} <button class="sbtn sm" onclick="loadSeriesPage(this)">重试</button></div>`;
+      else toast(error.message);
+    }
+  });
+}
 async function syncOrders(button) {
   return withBusy(button, async () => {
     try {
       const data = await api('/api/orders/sync', { method: 'POST', body: '{}' });
       toast(data.synced ? `已同步 ${data.synced} 笔订单` : '没有需要同步的订单');
-      await loadOrders();
-      await loadAccess();
+      await Promise.all([loadOrders(), loadSubscriptions(), loadAccess()]);
     } catch (error) {
       toast(error.message);
     }

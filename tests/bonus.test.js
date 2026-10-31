@@ -11,9 +11,11 @@ let DatabaseSync;
 try { ({ DatabaseSync } = await import('node:sqlite')); } catch {}
 const sqliteTest = (name, fn) => test(name, { skip: !DatabaseSync && 'requires Node 22 SQLite' }, fn);
 
-async function makeDb() {
+async function makeDb({ beforeSubscriptionMigration = false } = {}) {
   const raw = new DatabaseSync(':memory:');
-  for (const name of ['0001_init.sql', '0002_users_and_admin.sql', '0003_products_and_orders.sql', '0004_user_admin_roles.sql', '0005_categories_and_tags.sql', '0006_bonus_points.sql', '0007_catalog_agent.sql']) {
+  const migrations = ['0001_init.sql', '0002_users_and_admin.sql', '0003_products_and_orders.sql', '0004_user_admin_roles.sql', '0005_categories_and_tags.sql', '0006_bonus_points.sql', '0007_catalog_agent.sql'];
+  if (!beforeSubscriptionMigration) migrations.push('0008_subscriptions_and_repeat.sql');
+  for (const name of migrations) {
     raw.exec(await readFile(new URL('../migrations/' + name, import.meta.url), 'utf8'));
   }
   raw.exec(`INSERT INTO users(id,email,password_hash,created_at,role) VALUES
@@ -101,6 +103,7 @@ sqliteTest('admin-only bonus grants fund local-only delivery without onepay and 
 
 sqliteTest('mixed payment deducts only the remainder upstream and rolls back both stock and bonus on confirmed failure', async t => {
   const DB = await makeDb(), env = { DB, YIRENFU_API_KEY: 'fake-key' };
+  DB.raw.exec('UPDATE products SET allow_repeat=1');
   await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 3, reason: '测试', key: 'grant2' });
   const oldFetch = globalThis.fetch; t.after(() => { globalThis.fetch = oldFetch; DB.raw.close(); });
   let mode = 'success', amount;
@@ -181,6 +184,7 @@ sqliteTest('unknown upstream failure is refunded only after authoritative FAILED
 
 sqliteTest('concurrent requests never spend the same grant twice or reserve identical order twice', async () => {
   const DB = await makeDb(), env = { DB };
+  DB.raw.exec('UPDATE products SET allow_repeat=1');
   await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 10, reason: '测试', key: 'grant-concurrent' });
   DB.raw.exec('UPDATE products SET stock=1');
   const purchase = key => worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: key } }), env);
@@ -521,4 +525,233 @@ sqliteTest('administrators can still disable and enable other users and administ
   }
   assert.equal((await (await worker.fetch(request('/api/admin/me', { admin: true }), env)).json()).authenticated, true);
   assert.equal((await (await worker.fetch(request('/api/auth/me'), env)).json()).authenticated, false);
+});
+
+sqliteTest('non-repeatable goods block new purchases atomically while same-key retries remain idempotent', async t => {
+  const DB = await makeDb(), env = { DB };
+  t.after(() => DB.raw.close());
+  assert.equal(DB.raw.prepare("SELECT allow_repeat FROM products WHERE id='p_test'").get().allow_repeat, 0);
+  await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 40, reason: '测试', key: 'repeat-grant' });
+  const purchase = key => worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: key, expected_price: 10, expected_kind: 'SINGLE', expected_days: 0 } }), env);
+  const concurrent = await Promise.all([purchase('no-repeat-a'), purchase('no-repeat-b')]);
+  assert.equal(concurrent.filter(r => r.status === 200).length, 1);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) n FROM orders WHERE status='DELIVERED'").get().n, 1);
+  assert.equal(await bonusBalance(env, 'usr_user'), 30);
+  assert.equal(DB.raw.prepare('SELECT stock FROM products WHERE id=?').get('p_test').stock, 1);
+  const firstKey = DB.raw.prepare('SELECT idempotency_key FROM orders').get().idempotency_key;
+  const retry = await purchase(firstKey); assert.equal(retry.status, 200); assert.equal((await retry.json()).already_delivered, true);
+  const blocked = await purchase('no-repeat-c'); assert.equal(blocked.status, 409); assert.equal((await blocked.json()).error_code, 'ALREADY_PURCHASED');
+  assert.equal(await bonusBalance(env, 'usr_user'), 30);
+  const library = await worker.fetch(request('/api/library'), env);
+  assert.equal(library.headers.get('cache-control'), 'private, no-store');
+  assert.deepEqual((await library.json()).owned_product_ids, ['p_test']);
+  const adminProduct = (await (await worker.fetch(request('/api/admin/products', { admin: true }), env)).json()).items[0];
+  const edit = await worker.fetch(request('/api/admin/products/p_test', { admin: true, method: 'PUT', body: { ...adminProduct, allow_repeat: true } }), env);
+  assert.equal(edit.status, 200);
+  assert.equal((await purchase('repeat-allowed')).status, 200);
+  assert.equal(await bonusBalance(env, 'usr_user'), 20);
+});
+
+sqliteTest('displayed price and subscription terms cannot change before reservation', async t => {
+  const DB = await makeDb(), env = { DB };
+  t.after(() => DB.raw.close());
+  await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 20, reason: '测试', key: 'terms-grant' });
+  const result = await worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'terms-test', expected_price: 9, expected_kind: 'SINGLE', expected_days: 0 } }), env);
+  assert.equal(result.status, 409); assert.equal((await result.json()).error_code, 'PRODUCT_TERMS_CHANGED');
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) n FROM orders').get().n, 0);
+  assert.equal(await bonusBalance(env, 'usr_user'), 20);
+  assert.equal(DB.raw.prepare('SELECT stock FROM products').get().stock, 2);
+  for (const terms of [{ expected_kind: 'SUBSCRIPTION' }, { expected_days: 7 }]) {
+    const response = await worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'term-' + Object.keys(terms)[0], ...terms } }), env);
+    assert.equal(response.status, 409); assert.equal((await response.json()).error_code, 'PRODUCT_TERMS_CHANGED');
+  }
+  assert.equal(await bonusBalance(env, 'usr_user'), 20);
+});
+
+sqliteTest('timed subscriptions grant and extend once, protect updates, and expire until manual renewal', async t => {
+  const DB = await makeDb(), BUCKET = new FakeBucket(), env = { DB, BUCKET };
+  t.after(() => DB.raw.close());
+  await BUCKET.put('goods/test/private.pdf', new TextEncoder().encode('private file'), {});
+  const create = await worker.fetch(request('/api/admin/products', { admin: true, method: 'POST', body: { title: '每周系列', price_points: 10, product_kind: 'SUBSCRIPTION', subscription_days: 7, update_frequency: 'WEEKLY', preview_files: '第一期/\n第一期/公开文件名.pdf', stock: null, status: 'ACTIVE' } }), env);
+  assert.equal(create.status, 201);
+  const product = (await create.json()).product, pid = product.id;
+  const updatePath = `/api/admin/products/${pid}/updates`;
+  const createUpdate = body => worker.fetch(request(updatePath, { admin: true, method: 'POST', body }), env);
+  const text = await createUpdate({ title: '第一期', delivery_type: 'TEXT', delivery_text: 'private-text-content' });
+  assert.equal(text.status, 201);
+  const file = await createUpdate({ title: '第二期', delivery_type: 'FILE', file_key: 'goods/test/private.pdf', file_name: '资料.pdf' });
+  assert.equal(file.status, 201); const fid = (await file.json()).update.id;
+  assert.equal((await createUpdate({ title: '草稿', delivery_type: 'LINK', delivery_url: 'https://example.test/private-url', status: 'HIDDEN' })).status, 201);
+  const hiddenFile = await createUpdate({ title: '隐藏文件', delivery_type: 'FILE', file_key: 'goods/test/private.pdf', status: 'HIDDEN' });
+  const hiddenId = (await hiddenFile.json()).update.id;
+  assert.equal((await createUpdate({ title: '不存在的文件', delivery_type: 'FILE', file_key: 'goods/not-there' })).status, 404);
+  assert.equal((await worker.fetch(request(updatePath), env)).status, 401);
+  assert.equal((await worker.fetch(request(`/api/subscriptions/${pid}/updates`), env)).status, 404);
+  const publicText = await (await worker.fetch(request('/api/products'), env)).text();
+  assert.ok(publicText.includes('公开文件名.pdf'));
+  for (const secret of ['private-text-content', 'private-url', 'goods/test/private.pdf']) assert.equal(publicText.includes(secret), false);
+
+  await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 40, reason: '测试', key: 'sub-grant' });
+  const buy = (key, revision) => worker.fetch(request(`/api/products/${pid}/purchase`, { method: 'POST', body: { idempotency_key: key, expected_price: 10, expected_kind: 'SUBSCRIPTION', expected_days: 7, subscription_revision: revision } }), env);
+  const first = await buy('sub-one', 'none'); assert.equal(first.status, 200); assert.equal((await first.json()).delivery.type, 'SUBSCRIPTION');
+  const firstSub = DB.raw.prepare('SELECT * FROM subscriptions WHERE user_id=? AND product_id=?').get('usr_user', pid);
+  assert.equal(firstSub.permanent, 0);
+  assert.ok(firstSub.expires_at >= Math.floor(Date.now() / 1000) + 7 * 86400 - 2);
+  const retry = await buy('sub-one', 'none'); assert.equal(retry.status, 200); assert.equal((await retry.json()).already_delivered, true);
+  assert.equal(DB.raw.prepare('SELECT expires_at FROM subscriptions WHERE user_id=? AND product_id=?').get('usr_user', pid).expires_at, firstSub.expires_at);
+  const stale = await buy('sub-stale', 'none'); assert.equal(stale.status, 409); assert.equal((await stale.json()).error_code, 'SUBSCRIPTION_CHANGED');
+  assert.equal(await bonusBalance(env, 'usr_user'), 30);
+  const updateResponse = await worker.fetch(request(`/api/subscriptions/${pid}/updates`), env);
+  assert.equal(updateResponse.status, 200); assert.equal(updateResponse.headers.get('cache-control'), 'private, no-store');
+  const updates = await updateResponse.json(); assert.equal(updates.items.length, 2);
+  assert.ok(updates.items.some(u => u.delivery.text === 'private-text-content'));
+  assert.ok(!JSON.stringify(updates).includes('goods/test/private.pdf'));
+  assert.ok(!JSON.stringify(updates).includes('private-url'));
+  const download = await worker.fetch(request(`/api/subscriptions/${pid}/updates/${fid}/file`), env);
+  assert.equal(download.status, 200); assert.equal(await download.text(), 'private file');
+  assert.match(download.headers.get('content-disposition'), /attachment/);
+  assert.equal((await worker.fetch(request(`/api/subscriptions/${pid}/updates/${hiddenId}/file`), env)).status, 404);
+  DB.raw.exec("INSERT INTO users(id,email,password_hash,created_at,role) VALUES('usr_other','other@example.com','x','2026-01-01','user')");
+  DB.raw.prepare('INSERT INTO sessions(token_hash,user_id,role,expires_at,created_at) VALUES(?,?,?,?,?)').run(createHash('sha256').update('other-token').digest('base64url'), 'usr_other', 'user', 9999999999, '2026-01-01');
+  const other = path => new Request('https://example.test' + path, { headers: { cookie: 'onepay_session=other-token' } });
+  assert.equal((await worker.fetch(other(`/api/subscriptions/${pid}/updates`), env)).status, 404);
+  assert.equal((await worker.fetch(other(`/api/subscriptions/${pid}/updates/${fid}/file`), env)).status, 404);
+  assert.equal((await worker.fetch(new Request(`https://example.test/api/subscriptions/${pid}/updates`), env)).status, 401);
+
+  assert.equal((await buy('sub-renew', `until:${firstSub.expires_at}`)).status, 200);
+  assert.equal(DB.raw.prepare('SELECT expires_at FROM subscriptions WHERE user_id=? AND product_id=?').get('usr_user', pid).expires_at, firstSub.expires_at + 7 * 86400);
+  assert.equal(await bonusBalance(env, 'usr_user'), 20);
+  DB.raw.prepare('UPDATE subscriptions SET expires_at=? WHERE user_id=? AND product_id=?').run(Math.floor(Date.now() / 1000) - 1, 'usr_user', pid);
+  assert.equal((await worker.fetch(request(`/api/subscriptions/${pid}/updates`), env)).status, 403);
+  assert.equal((await worker.fetch(request(`/api/subscriptions/${pid}/updates/${fid}/file`), env)).status, 403);
+  assert.equal((await (await worker.fetch(request('/api/subscriptions'), env)).json()).items[0].active, false);
+  const expiredRevision = `until:${DB.raw.prepare('SELECT expires_at FROM subscriptions WHERE user_id=? AND product_id=?').get('usr_user', pid).expires_at}`;
+  assert.equal((await buy('sub-after-expiry', expiredRevision)).status, 200);
+  assert.equal((await worker.fetch(request(`/api/subscriptions/${pid}/updates`), env)).status, 200);
+  assert.ok(DB.raw.prepare('SELECT expires_at FROM subscriptions WHERE user_id=? AND product_id=?').get('usr_user', pid).expires_at >= Math.floor(Date.now() / 1000) + 7 * 86400 - 2);
+
+  const changingKind = await worker.fetch(request(`/api/admin/products/${pid}`, { admin: true, method: 'PUT', body: { ...product, product_kind: 'SINGLE', delivery_type: 'TEXT', delivery_text: 'x' } }), env);
+  assert.equal(changingKind.status, 409); assert.equal((await changingKind.json()).error_code, 'PRODUCT_KIND_LOCKED');
+  assert.equal((await worker.fetch(request('/api/admin/users/usr_user', { admin: true, method: 'DELETE' }), env)).status, 200);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) n FROM subscriptions WHERE user_id=?').get('usr_user').n, 0);
+});
+
+sqliteTest('permanent subscriptions cannot be bought twice and do not expire after product term edits', async t => {
+  const DB = await makeDb(), env = { DB };
+  t.after(() => DB.raw.close());
+  const create = await worker.fetch(request('/api/admin/products', { admin: true, method: 'POST', body: { title: '永久系列', price_points: 10, product_kind: 'SUBSCRIPTION', subscription_days: 0, update_frequency: 'DAILY', stock: null, status: 'ACTIVE' } }), env);
+  assert.equal(create.status, 201); const p = (await create.json()).product;
+  await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 20, reason: '测试', key: 'permanent-grant' });
+  const buy = (key, days = 0, revision = 'none') => worker.fetch(request(`/api/products/${p.id}/purchase`, { method: 'POST', body: { idempotency_key: key, expected_price: 10, expected_kind: 'SUBSCRIPTION', expected_days: days, subscription_revision: revision } }), env);
+  assert.equal((await buy('permanent-one')).status, 200);
+  const sub = DB.raw.prepare('SELECT * FROM subscriptions WHERE user_id=? AND product_id=?').get('usr_user', p.id);
+  assert.equal(sub.permanent, 1); assert.equal(sub.expires_at, null);
+  const edit = await worker.fetch(request(`/api/admin/products/${p.id}`, { admin: true, method: 'PUT', body: { ...p, subscription_days: 30, allow_repeat: 1 } }), env);
+  assert.equal(edit.status, 200);
+  const duplicate = await buy('permanent-two', 30, 'permanent'); assert.equal(duplicate.status, 409); assert.equal((await duplicate.json()).error_code, 'ALREADY_SUBSCRIBED');
+  assert.equal(await bonusBalance(env, 'usr_user'), 10);
+  assert.equal(DB.raw.prepare('SELECT permanent FROM subscriptions WHERE user_id=? AND product_id=?').get('usr_user', p.id).permanent, 1);
+});
+
+sqliteTest('subscription entitlement is granted only after an ambiguous upstream debit is confirmed', async t => {
+  const DB = await makeDb(), env = { DB, YIRENFU_API_KEY: 'fake-key' };
+  const oldFetch = globalThis.fetch; t.after(() => { globalThis.fetch = oldFetch; DB.raw.close(); });
+  DB.raw.exec("UPDATE products SET product_kind='SUBSCRIPTION',subscription_days=30,stock=NULL WHERE id='p_test'");
+  let confirmed = false, consumes = 0;
+  globalThis.fetch = async url => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/capabilities')) return Response.json({ capabilities: { entitlement_query: true, consumption: true } });
+    if (path.endsWith('/access')) return Response.json({ requires_consumption: true, access_granted: true, remaining: 100 });
+    if (path.endsWith('/consume')) { consumes++; return Response.json({ status: 'PROCESSING' }); }
+    if (path.endsWith('/consumption')) return Response.json(confirmed ? { status: 'SUCCEEDED', confirmed: true } : { status: 'PROCESSING' });
+    throw new Error('unexpected endpoint');
+  };
+  const buy = () => worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'sub-unknown', expected_price: 10, expected_kind: 'SUBSCRIPTION', expected_days: 30, subscription_revision: 'none' } }), env);
+  assert.equal((await buy()).status, 202);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) n FROM subscriptions').get().n, 0);
+  assert.equal((await buy()).status, 202); assert.equal(consumes, 1);
+  const legacyRetry = await worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'sub-unknown' } }), env);
+  assert.equal(legacyRetry.status, 202); assert.equal(consumes, 1);
+  const differentKey = await worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'sub-unknown-other', expected_price: 10, expected_kind: 'SUBSCRIPTION', expected_days: 30, subscription_revision: 'none' } }), env);
+  assert.equal(differentKey.status, 409); assert.equal((await differentKey.json()).error_code, 'ORDER_ALREADY_PENDING');
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) n FROM subscriptions').get().n, 0); assert.equal(consumes, 1);
+  confirmed = true;
+  const synced = await worker.fetch(request('/api/orders/sync', { method: 'POST', body: {} }), env);
+  assert.equal((await synced.json()).synced, 1);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) n FROM subscriptions').get().n, 1);
+  const expires = DB.raw.prepare('SELECT expires_at FROM subscriptions').get().expires_at;
+  assert.equal((await buy()).status, 200);
+  assert.equal(DB.raw.prepare('SELECT expires_at FROM subscriptions').get().expires_at, expires);
+  assert.equal(consumes, 1);
+});
+
+sqliteTest('migration marks existing products as non-repeatable and historical orders as ordinary purchases', async t => {
+  const DB = await makeDb({ beforeSubscriptionMigration: true }), env = { DB };
+  t.after(() => DB.raw.close());
+  DB.raw.exec(`INSERT INTO orders(idempotency_key,order_no,user_id,product_id,title,price_points,delivery_type,delivery_text,status,created_at,delivered_at)
+    VALUES('legacy-order','NOOLD','usr_user','p_test','旧商品',10,'TEXT','旧内容','DELIVERED','2025-01-01','2025-01-01');`);
+  DB.raw.exec(await readFile(new URL('../migrations/0008_subscriptions_and_repeat.sql', import.meta.url), 'utf8'));
+  assert.equal(DB.raw.prepare("SELECT allow_repeat FROM products WHERE id='p_test'").get().allow_repeat, 0);
+  assert.deepEqual({ ...DB.raw.prepare("SELECT product_kind,subscription_days FROM orders WHERE idempotency_key='legacy-order'").get() }, { product_kind: 'SINGLE', subscription_days: 0 });
+  await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 20, reason: '测试', key: 'legacy-grant' });
+  const response = await worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'legacy-repeat' } }), env);
+  assert.equal(response.status, 409); assert.equal((await response.json()).error_code, 'ALREADY_PURCHASED');
+  assert.equal(await bonusBalance(env, 'usr_user'), 20);
+});
+
+sqliteTest('two concurrent subscription confirmations with the same quoted entitlement cannot both charge', async t => {
+  const DB = await makeDb(), env = { DB }; t.after(() => DB.raw.close());
+  DB.raw.exec("UPDATE products SET product_kind='SUBSCRIPTION',subscription_days=7,stock=NULL WHERE id='p_test'");
+  await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 20, reason: '测试', key: 'parallel-sub-grant' });
+  const unconfirmed = await worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'missing-quote' } }), env);
+  assert.equal(unconfirmed.status, 409); assert.equal((await unconfirmed.json()).error_code, 'SUBSCRIPTION_CONFIRMATION_REQUIRED');
+  assert.equal(await bonusBalance(env, 'usr_user'), 20);
+  const buy = key => worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: {
+    idempotency_key: key, expected_price: 10, expected_kind: 'SUBSCRIPTION', expected_days: 7, subscription_revision: 'none',
+  } }), env);
+  const responses = await Promise.all([buy('parallel-sub-a'), buy('parallel-sub-b')]);
+  assert.equal(responses.filter(r => r.status === 200).length, 1);
+  assert.equal(responses.filter(r => r.status === 409).length, 1);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) n FROM orders').get().n, 1);
+  assert.equal(await bonusBalance(env, 'usr_user'), 10);
+});
+
+sqliteTest('private series updates page correctly and hidden entries are never included', async t => {
+  const DB = await makeDb(), env = { DB }; t.after(() => DB.raw.close());
+  DB.raw.exec("UPDATE products SET product_kind='SUBSCRIPTION',subscription_days=0,stock=NULL WHERE id='p_test'");
+  await adjustBonus(env, { userId: 'usr_user', actorId: 'usr_admin', delta: 10, reason: '测试', key: 'paging-grant' });
+  assert.equal((await worker.fetch(request('/api/products/p_test/purchase', { method: 'POST', body: { idempotency_key: 'paging-purchase', expected_price: 10, expected_kind: 'SUBSCRIPTION', expected_days: 0, subscription_revision: 'none' } }), env)).status, 200);
+  const insert = DB.raw.prepare("INSERT INTO subscription_updates(id,product_id,title,delivery_type,delivery_text,status,created_at,updated_at) VALUES(?,? ,?,'TEXT',?,?,?,?)");
+  for (let i = 0; i < 35; i++) insert.run(`upd_${String(i).padStart(2, '0')}`, 'p_test', `期数${i}`, `私密${i}`, i === 34 ? 'HIDDEN' : 'PUBLISHED', '2026-01-01', '2026-01-01');
+  const first = await worker.fetch(request('/api/subscriptions/p_test/updates'), env);
+  const one = await first.json(); assert.equal(first.headers.get('cache-control'), 'private, no-store');
+  assert.equal(one.items.length, 30); assert.equal(one.has_more, true); assert.equal(one.next_offset, 30);
+  const two = await (await worker.fetch(request('/api/subscriptions/p_test/updates?offset=30'), env)).json();
+  assert.equal(two.items.length, 4); assert.equal(two.has_more, false);
+  assert.equal(new Set([...one.items, ...two.items].map(x => x.id)).size, 34);
+  assert.ok(!JSON.stringify([one, two]).includes('私密34'));
+});
+
+sqliteTest('admin Agent status checks token configuration without returning the token', async t => {
+  const DB = await makeDb(), secret = 'preview-agent-secret-that-is-long-enough'; t.after(() => DB.raw.close());
+  const status = async token => worker.fetch(request('/api/admin/status', { admin: true }), { DB, AGENT_API_TOKEN: token });
+  const enabled = await status(secret); const text = await enabled.text();
+  assert.equal(JSON.parse(text).agentConfigured, true); assert.equal(text.includes(secret), false);
+  assert.equal((await (await status('short')).json()).agentConfigured, false);
+  assert.equal((await (await status(secret + ' ')).json()).agentConfigured, false);
+  assert.equal((await worker.fetch(request('/api/admin/status'), { DB, AGENT_API_TOKEN: secret })).status, 401);
+});
+
+sqliteTest('a user can page through their full purchase history without exposing other users orders', async t => {
+  const DB = await makeDb(), env = { DB }; t.after(() => DB.raw.close());
+  const insert = DB.raw.prepare("INSERT INTO orders(idempotency_key,order_no,user_id,product_id,title,price_points,delivery_type,delivery_text,status,created_at,delivered_at) VALUES(?,?,?,?,?,10,'TEXT',?,'DELIVERED',?,?)");
+  for (let i = 0; i < 54; i++) insert.run(`page-${String(i).padStart(2, '0')}`, `NO${i}`, 'usr_user', 'p_test', '旧订单', `本人内容${i}`, '2026-01-01', '2026-01-01');
+  insert.run('page-admin', 'NOADMIN', 'usr_admin', 'p_test', '他人订单', '不得泄露', '2026-01-01', '2026-01-01');
+  const firstResponse = await worker.fetch(request('/api/orders?offset=0'), env), first = await firstResponse.json();
+  assert.equal(first.items.length, 50); assert.equal(first.has_more, true); assert.equal(first.next_offset, 50);
+  assert.equal(firstResponse.headers.get('cache-control'), 'private, no-store');
+  const second = await (await worker.fetch(request('/api/orders?offset=50'), env)).json();
+  assert.equal(second.items.length, 4); assert.equal(second.has_more, false);
+  assert.equal(new Set([...first.items, ...second.items].map(order => order.key)).size, 54);
+  assert.ok(!JSON.stringify([first, second]).includes('不得泄露'));
 });

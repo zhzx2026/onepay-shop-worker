@@ -1,6 +1,7 @@
 import { cachedPublicJson, invalidatePublicCache, withStaticCache, productTagFilters } from './cache.js';
 import { detectNetdisk, providerTags, normalizePreview, readShareDirectory } from './netdisk.js';
 import { bonusBalance, bonusHistory, adjustBonus, reserveOrder, refundOrder } from './bonus.js';
+import { SUBSCRIPTION_FREQUENCIES, validSubscriptionDays, isSubscriptionActive, finalizeSubscriptionOrder, subscriptionFor, subscriptionView, parseSubscriptionUpdate, subscriberUpdateView } from './subscriptions.js';
 
 const API = 'https://ai6666.com/opcpay/api/pay/v1';
 const encoder = new TextEncoder();
@@ -374,8 +375,12 @@ function publicProduct(p) {
     preview_source: p.preview_source || '',
     preview_updated_at: p.preview_updated_at || null,
     preview_truncated: Boolean(p.preview_truncated),
+    product_kind: p.product_kind || 'SINGLE',
+    allow_repeat: Boolean(p.allow_repeat),
+    subscription_days: Number(p.subscription_days || 0),
+    update_frequency: p.update_frequency || 'IRREGULAR',
     delivery_type: p.delivery_type,
-    delivery_label: ({ TEXT: '文本内容', LINK: '下载链接', FILE: '文件下载' })[p.delivery_type] || '数字交付',
+    delivery_label: p.product_kind === 'SUBSCRIPTION' ? '系列订阅' : (({ TEXT: '文本内容', LINK: '下载链接', FILE: '文件下载' })[p.delivery_type] || '数字交付'),
     stock: p.stock,
     sold_count: p.sold_count,
     status: p.status,
@@ -394,12 +399,15 @@ function orderView(o) {
     bonus_points_used: Number(o.bonus_points_used || 0),
     onepay_points_used: Number(o.price_points) - Number(o.bonus_points_used || 0),
     status: o.status,
+    product_kind: o.product_kind || 'SINGLE',
+    subscription_days: Number(o.subscription_days || 0),
     delivery_type: o.delivery_type,
     created_at: o.created_at,
     delivered_at: o.delivered_at,
   };
 }
 function orderDelivery(o) {
+  if (o.product_kind === 'SUBSCRIPTION') return { type: 'SUBSCRIPTION', product_id: o.product_id, days: Number(o.subscription_days || 0) };
   if (o.delivery_type === 'TEXT') return { type: 'TEXT', text: o.delivery_text };
   if (o.delivery_type === 'LINK') return { type: 'LINK', url: o.delivery_url };
   return {
@@ -410,7 +418,9 @@ function orderDelivery(o) {
     },
   };
 }
-async function finalizeOrder(env, key, token) {
+async function finalizeOrder(env, order, token) {
+  const key = order.idempotency_key;
+  if (order.product_kind === 'SUBSCRIPTION') return finalizeSubscriptionOrder(env, key, token);
   await env.DB.prepare("UPDATE orders SET status='DELIVERED', delivered_at=? WHERE idempotency_key=? AND status='PENDING' AND processing_token=?").bind(now(), key, token).run();
   return env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
 }
@@ -427,12 +437,16 @@ function parseProduct(b) {
   const cover = String(b.cover_url ?? '').trim();
   const categoryId = String(b.category_id ?? '').trim();
   const rawTags = parseTags(b.tags);
-  const type = String(b.delivery_type ?? 'TEXT').toUpperCase();
-  const text = String(b.delivery_text ?? '');
+  const productKind = String(b.product_kind ?? 'SINGLE').toUpperCase();
+  const days = productKind === 'SUBSCRIPTION' ? Number(b.subscription_days ?? 0) : 0;
+  const frequency = productKind === 'SUBSCRIPTION' ? String(b.update_frequency ?? 'IRREGULAR').toUpperCase() : 'IRREGULAR';
+  const repeat = b.allow_repeat ?? false;
+  const type = productKind === 'SUBSCRIPTION' ? 'TEXT' : String(b.delivery_type ?? 'TEXT').toUpperCase();
+  const text = productKind === 'SUBSCRIPTION' ? '' : String(b.delivery_text ?? '');
   const link = String(b.delivery_url ?? '').trim();
   const tags = providerTags(rawTags, type, link, MAX_PRODUCT_TAGS);
-  const preview = normalizePreview(type === 'LINK' ? b.preview_files : undefined);
-  const source = ['quark', 'baidu'].includes(b.preview_source) && detectNetdisk(link)?.id === b.preview_source ? b.preview_source : 'manual';
+  const preview = normalizePreview(productKind === 'SUBSCRIPTION' || type === 'LINK' ? b.preview_files : undefined);
+  const source = type === 'LINK' && ['quark', 'baidu'].includes(b.preview_source) && detectNetdisk(link)?.id === b.preview_source ? b.preview_source : 'manual';
   const fileKey = String(b.file_key ?? '').trim();
   const fileName = String(b.file_name ?? '').trim();
   const status = String(b.status ?? 'ACTIVE').toUpperCase();
@@ -442,6 +456,8 @@ function parseProduct(b) {
   else stock = Number(stock);
 
   if (!preview.ok) return preview;
+  if (!['SINGLE', 'SUBSCRIPTION'].includes(productKind) || !validSubscriptionDays(days) || !SUBSCRIPTION_FREQUENCIES.has(frequency)) return { ok: false, error: '商品类型、订阅时长或更新频率无效' };
+  if (![true, false, 0, 1].includes(repeat)) return { ok: false, error: '重复购买设置无效' };
   if (title.length < 1 || title.length > 80) return { ok: false, error: '商品名称需为 1-80 个字符' };
   if (summary.length > 200) return { ok: false, error: '副标题最多 200 个字符' };
   if (description.length > 4000) return { ok: false, error: '商品详情最多 4000 个字符' };
@@ -449,7 +465,7 @@ function parseProduct(b) {
   if (cover && (cover.length > 500 || !(httpUrl(cover) || cover.startsWith('/')))) return { ok: false, error: '封面地址需为 http(s) 链接或以 / 开头的站内路径' };
   if (categoryId && !/^cat_[A-Za-z0-9\-]{1,60}$/.test(categoryId)) return { ok: false, error: '商品分类编号无效' };
   if (!DELIVERY_TYPES.has(type)) return { ok: false, error: '交付方式只能是 TEXT / LINK / FILE' };
-  if (type === 'TEXT' && (text.trim().length < 1 || text.length > 20000)) return { ok: false, error: '文本交付内容需为 1-20000 个字符' };
+  if (productKind === 'SINGLE' && type === 'TEXT' && (text.trim().length < 1 || text.length > 20000)) return { ok: false, error: '文本交付内容需为 1-20000 个字符' };
   if (type === 'LINK' && (link.length < 1 || link.length > 2000 || !httpUrl(link))) return { ok: false, error: '链接交付内容需为有效的 http(s) 链接（如网盘链接）' };
   if (type === 'FILE' && (fileKey.length < 1 || fileKey.length > 512)) return { ok: false, error: '文件交付需要先上传文件或填写已上传文件的存储 key' };
   if (!PRODUCT_STATUS.has(status)) return { ok: false, error: '状态只能是 ACTIVE / HIDDEN' };
@@ -468,6 +484,7 @@ function parseProduct(b) {
       delivery_url: type === 'LINK' ? link : '',
       file_key: type === 'FILE' ? fileKey : '',
       file_name: type === 'FILE' ? (fileName || fileKey.split('/').pop() || '下载文件').slice(0, 120) : '',
+      product_kind: productKind, allow_repeat: repeat ? 1 : 0, subscription_days: days, update_frequency: frequency,
       stock, status, sort_order: sort,
     },
   };
@@ -514,7 +531,7 @@ async function processOrder(env, user, order, request) {
       return { finished: changed, response: consumed.response };
     }
     if (consumed.state !== 'DONE') return { finished: false, response: consumed.response };
-    const done = await finalizeOrder(env, key, token);
+    const done = await finalizeOrder(env, order, token);
     if (!done || done.status !== 'DELIVERED') return { finished: false, response: pendingConsumption(key, '订单处理权已变更，请稍后同步').response };
     return { finished: true, response: json({ order: orderView(done), delivery: orderDelivery(done), delivered: true }) };
   } catch {
@@ -529,18 +546,43 @@ async function purchaseProduct(request, env, productId) {
   const body = await bodyJson(request);
   const key = body.idempotency_key;
   if (!validText(key, 1, 128)) return fail(400, '购买编号无效', 'INVALID_ARGUMENT');
+  const expectedPrice = body.expected_price ?? null, expectedKind = body.expected_kind ?? null, expectedDays = body.expected_days ?? null;
+  const expectedSubscriptionRevision = body.subscription_revision ?? null;
+  if ((expectedPrice !== null && (!Number.isInteger(expectedPrice) || expectedPrice < 1)) ||
+      (expectedKind !== null && !['SINGLE', 'SUBSCRIPTION'].includes(expectedKind)) ||
+      (expectedDays !== null && !validSubscriptionDays(expectedDays)) ||
+      (expectedSubscriptionRevision !== null && (typeof expectedSubscriptionRevision !== 'string' || !/^(none|permanent|until:\d{1,12})$/.test(expectedSubscriptionRevision)))) return fail(400, '确认的商品条件无效', 'INVALID_ARGUMENT');
+  const termsChanged = p => (expectedPrice !== null && Number(p.price_points) !== expectedPrice) ||
+    (expectedKind !== null && (p.product_kind || 'SINGLE') !== expectedKind) ||
+    (expectedDays !== null && Number(p.subscription_days || 0) !== expectedDays);
   let order = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
   if (!order) {
     const p = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(productId).first();
     if (!p) return fail(404, '商品不存在', 'PRODUCT_NOT_FOUND');
     if (p.status !== 'ACTIVE') return fail(409, '该商品已下架', 'PRODUCT_UNAVAILABLE');
+    if (p.product_kind === 'SUBSCRIPTION' && (expectedPrice === null || expectedKind === null || expectedDays === null || expectedSubscriptionRevision === null)) {
+      return fail(409, '请刷新页面并确认订阅价格、期限和当前权益', 'SUBSCRIPTION_CONFIRMATION_REQUIRED');
+    }
+    if (termsChanged(p)) return fail(409, '商品价格或订阅条件已变更，请刷新后确认', 'PRODUCT_TERMS_CHANGED');
     try {
-      if (!await reserveOrder(env, { productId, userId: user.id, key, orderNo: orderNo() })) {
+      if (!await reserveOrder(env, { productId, userId: user.id, key, orderNo: orderNo(), expectedPrice, expectedKind, expectedDays, expectedSubscriptionRevision })) {
         // The same key may have reserved the last item between the first read and this batch.
         order = await env.DB.prepare('SELECT * FROM orders WHERE idempotency_key=?').bind(key).first();
         if (!order) {
           const pending = await env.DB.prepare("SELECT idempotency_key FROM orders WHERE user_id=? AND product_id=? AND status='PENDING' LIMIT 1").bind(user.id, productId).first();
           if (pending) return fail(409, '该商品已有待确认订单，请先在「我的已购」同步，避免重复扣分', 'ORDER_ALREADY_PENDING');
+          const current = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(productId).first();
+          if (!current || current.status !== 'ACTIVE') return fail(409, '该商品已下架', 'PRODUCT_UNAVAILABLE');
+          if (termsChanged(current)) return fail(409, '商品价格或订阅条件已变更，请刷新后确认', 'PRODUCT_TERMS_CHANGED');
+          if (current.product_kind === 'SUBSCRIPTION') {
+            const sub = await subscriptionFor(env, user.id, productId);
+            if (Number(sub?.permanent) === 1) return fail(409, '已拥有永久订阅，无需重复购买', 'ALREADY_SUBSCRIBED');
+            const revision = sub ? `until:${Number(sub.expires_at)}` : 'none';
+            if (expectedSubscriptionRevision !== null && expectedSubscriptionRevision !== revision) return fail(409, '订阅状态已变更，请刷新后确认', 'SUBSCRIPTION_CHANGED');
+          } else if (!current.allow_repeat) {
+            const owned = await env.DB.prepare("SELECT idempotency_key FROM orders WHERE user_id=? AND product_id=? AND status='DELIVERED' LIMIT 1").bind(user.id, productId).first();
+            if (owned) return fail(409, '该商品已购买，不能重复兑换', 'ALREADY_PURCHASED');
+          }
           await invalidatePublicCache(request, ['catalog']);
           return fail(409, '该商品已售罄或暂不可兑换', 'OUT_OF_STOCK');
         }
@@ -560,8 +602,8 @@ async function purchaseProduct(request, env, productId) {
   return (await processOrder(env, user, order, request)).response;
 }
 
-async function listOrders(env, user, limit = 50) {
-  const rows = await env.DB.prepare('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT ?').bind(user.id, limit).all();
+async function listOrders(env, user, limit = 50, offset = 0) {
+  const rows = await env.DB.prepare('SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC,idempotency_key DESC LIMIT ? OFFSET ?').bind(user.id, limit, offset).all();
   return (rows.results || []).map(o => ({
     ...orderView(o),
     delivery: o.status === 'DELIVERED' ? orderDelivery(o) : null,
@@ -576,6 +618,39 @@ async function syncOrders(env, user, request) {
     if (result.finished) synced++;
   }
   return synced;
+}
+
+async function listSubscriptions(env, user) {
+  const rows = await env.DB.prepare(`SELECT s.*,p.title,p.cover_url,p.status FROM subscriptions s
+    LEFT JOIN products p ON p.id=s.product_id WHERE s.user_id=? ORDER BY s.updated_at DESC`).bind(user.id).all();
+  return (rows.results || []).map(subscriptionView);
+}
+
+async function subscriptionUpdates(request, env, user, productId, updateId = '') {
+  const sub = await subscriptionFor(env, user.id, productId);
+  if (!sub) return fail(404, '未找到该系列订阅', 'SUBSCRIPTION_NOT_FOUND');
+  if (!isSubscriptionActive(sub)) return fail(403, '订阅已到期，请续订后查看系列更新', 'SUBSCRIPTION_EXPIRED');
+  if (updateId) {
+    const update = await env.DB.prepare("SELECT * FROM subscription_updates WHERE id=? AND product_id=? AND status='PUBLISHED'").bind(updateId, productId).first();
+    if (!update || update.delivery_type !== 'FILE' || !update.file_key) return fail(404, '更新文件不存在', 'FILE_NOT_FOUND');
+    if (!env.BUCKET) return fail(503, '服务端尚未绑定对象存储', 'STORAGE_NOT_CONFIGURED');
+    const object = await env.BUCKET.get(update.file_key);
+    if (!object) return fail(404, '文件已不存在，请联系管理员', 'FILE_MISSING');
+    return new Response(object.body, { headers: {
+      'content-type': object.httpMetadata?.contentType || 'application/octet-stream',
+      'content-length': String(object.size),
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(update.file_name || 'download')}`,
+      'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff',
+    } });
+  }
+  const url = new URL(request.url);
+  const rawOffset = Number(url.searchParams.get('offset') || 0);
+  const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, Math.min(100000, rawOffset)) : 0;
+  const limit = 30;
+  const rows = await env.DB.prepare("SELECT * FROM subscription_updates WHERE product_id=? AND status='PUBLISHED' ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?")
+    .bind(productId, limit + 1, offset).all();
+  const items = rows.results || [];
+  return json({ items: items.slice(0, limit).map(subscriberUpdateView), has_more: items.length > limit, next_offset: offset + limit });
 }
 
 async function downloadOrderFile(request, env, key) {
@@ -621,9 +696,12 @@ async function uploadFile(request, env, source = 'goods') {
 
 // Agent credentials have no admin or publishing privileges. The secret never
 // enters D1, URLs, public responses, or audit logs.
+function agentConfigured(env) {
+  return /^[^\s]{32,512}$/.test(String(env.AGENT_API_TOKEN || ''));
+}
 async function requireAgent(request, env) {
   const secret = String(env.AGENT_API_TOKEN || '');
-  if (secret.length < 32) throw Object.assign(new Error('Agent 接口未配置安全令牌'), { status: 503, code: 'AGENT_NOT_CONFIGURED' });
+  if (!agentConfigured(env)) throw Object.assign(new Error('Agent 接口未配置安全令牌'), { status: 503, code: 'AGENT_NOT_CONFIGURED' });
   const match = (request.headers.get('authorization') || '').match(/^Bearer ([^\s]{1,512})$/i);
   const candidate = match?.[1] || '';
   if (!constantEq(await sha256(candidate), await sha256(secret))) {
@@ -765,12 +843,29 @@ async function route(request, env, ctx) {
   // 我的订单 / 已购内容
   if (path === '/api/orders' && method === 'GET') {
     const user = await requireUser(request, env);
-    return json({ items: await listOrders(env, user) });
+    const rawOffset = Number(url.searchParams.get('offset') || 0);
+    const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, Math.min(100000, rawOffset)) : 0;
+    const items = await listOrders(env, user, 51, offset);
+    return json({ items: items.slice(0, 50), has_more: items.length > 50, next_offset: offset + 50 });
   }
   if (path === '/api/orders/sync' && method === 'POST') {
     const user = await requireUser(request, env);
     const synced = await syncOrders(env, user, request);
     return json({ ok: true, synced, items: await listOrders(env, user) });
+  }
+  if (path === '/api/library' && method === 'GET') {
+    const user = await requireUser(request, env);
+    const owned = await env.DB.prepare("SELECT DISTINCT product_id FROM orders WHERE user_id=? AND status='DELIVERED' AND product_kind='SINGLE'").bind(user.id).all();
+    return json({ owned_product_ids: (owned.results || []).map(row => row.product_id), subscriptions: await listSubscriptions(env, user) });
+  }
+  if (path === '/api/subscriptions' && method === 'GET') {
+    const user = await requireUser(request, env);
+    return json({ items: await listSubscriptions(env, user) });
+  }
+  const subscriptionRoute = path.match(/^\/api\/subscriptions\/([A-Za-z0-9_\-]{1,64})\/updates(?:\/([A-Za-z0-9_\-]{1,64})\/file)?$/);
+  if (subscriptionRoute && method === 'GET') {
+    const user = await requireUser(request, env);
+    return subscriptionUpdates(request, env, user, subscriptionRoute[1], subscriptionRoute[2] || '');
   }
   const dlMatch = path.match(/^\/api\/download\/([A-Za-z0-9_\-]{1,128})$/);
   if (dlMatch && method === 'GET') return downloadOrderFile(request, env, dlMatch[1]);
@@ -938,13 +1033,58 @@ async function route(request, env, ctx) {
       const pid = id('prd_');
       const v = parsed.value;
       if (!await productCategoryOk(env, v.category_id)) return fail(400, '所选商品分类不存在', 'CATEGORY_NOT_FOUND');
-      await env.DB.prepare(`INSERT INTO products(id,title,summary,description,price_points,cover_url,category_id,tags,delivery_type,delivery_text,delivery_url,file_key,file_name,stock,status,sort_order,created_at,updated_at,preview_files,preview_source,preview_updated_at,preview_truncated)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(pid, v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), now(), JSON.stringify(v.preview_files), v.preview_source, v.preview_files.length ? now() : null, v.preview_truncated).run();
+      await env.DB.prepare(`INSERT INTO products(id,title,summary,description,price_points,cover_url,category_id,tags,delivery_type,delivery_text,delivery_url,file_key,file_name,stock,status,sort_order,created_at,updated_at,preview_files,preview_source,preview_updated_at,preview_truncated,product_kind,allow_repeat,subscription_days,update_frequency)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(pid, v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), now(), JSON.stringify(v.preview_files), v.preview_source, v.preview_files.length ? now() : null, v.preview_truncated, v.product_kind, v.allow_repeat, v.subscription_days, v.update_frequency).run();
       await audit(env, 'goods.created', pid, `${v.title} / ${v.price_points} 积分`);
       await invalidatePublicCache(request, ['catalog']);
       const row = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(pid).first();
       return json({ ok: true, product: row }, 201);
+    }
+    const updatesRoute = path.match(/^\/api\/admin\/products\/([A-Za-z0-9_\-]{1,64})\/updates(?:\/([A-Za-z0-9_\-]{1,64}))?$/);
+    if (updatesRoute) {
+      const productId = updatesRoute[1], updateId = updatesRoute[2] || '';
+      const product = await env.DB.prepare('SELECT id,title,product_kind FROM products WHERE id=?').bind(productId).first();
+      if (!product) return fail(404, '商品不存在', 'PRODUCT_NOT_FOUND');
+      if (product.product_kind !== 'SUBSCRIPTION') return fail(409, '只有订阅系列可以发布更新', 'NOT_SUBSCRIPTION');
+      if (method === 'GET' && !updateId) {
+        const rawOffset = Number(url.searchParams.get('offset') || 0);
+        const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, Math.min(100000, rawOffset)) : 0;
+        const rows = await env.DB.prepare('SELECT * FROM subscription_updates WHERE product_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?').bind(productId, 51, offset).all();
+        const items = rows.results || [];
+        return json({ items: items.slice(0, 50), has_more: items.length > 50, next_offset: offset + 50 });
+      }
+      if ((method === 'POST' && !updateId) || (method === 'PUT' && updateId)) {
+        const parsed = parseSubscriptionUpdate(await bodyJson(request));
+        if (!parsed.ok) return fail(400, parsed.error, 'INVALID_ARGUMENT');
+        const v = parsed.value;
+        if (v.delivery_type === 'FILE') {
+          if (!env.BUCKET) return fail(503, '尚未绑定 R2 存储', 'STORAGE_NOT_CONFIGURED');
+          if (!await env.BUCKET.head(v.file_key)) return fail(404, '更新文件不存在，请重新上传', 'FILE_NOT_FOUND');
+        }
+        let savedId = updateId;
+        if (!updateId) {
+          savedId = id('upd_'); const at = now();
+          const inserted = await env.DB.prepare(`INSERT INTO subscription_updates(id,product_id,title,summary,delivery_type,delivery_text,delivery_url,file_key,file_name,status,created_at,updated_at)
+            SELECT ?,id,?,?,?,?,?,?,?,?,?,? FROM products WHERE id=? AND product_kind='SUBSCRIPTION'`)
+            .bind(savedId, v.title, v.summary, v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.status, at, at, productId).run();
+          if (!Number(inserted.meta?.changes || 0)) return fail(409, '订阅系列已变更', 'NOT_SUBSCRIPTION');
+        } else {
+          const updated = await env.DB.prepare('UPDATE subscription_updates SET title=?,summary=?,delivery_type=?,delivery_text=?,delivery_url=?,file_key=?,file_name=?,status=?,updated_at=? WHERE id=? AND product_id=?')
+            .bind(v.title, v.summary, v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.status, now(), updateId, productId).run();
+          if (!Number(updated.meta?.changes || 0)) return fail(404, '系列更新不存在', 'UPDATE_NOT_FOUND');
+        }
+        await audit(env, updateId ? 'series.update_edited' : 'series.update_created', savedId, v.title);
+        const row = await env.DB.prepare('SELECT * FROM subscription_updates WHERE id=? AND product_id=?').bind(savedId, productId).first();
+        return json({ ok: true, update: row }, updateId ? 200 : 201);
+      }
+      if (method === 'DELETE' && updateId) {
+        const deleted = await env.DB.prepare('DELETE FROM subscription_updates WHERE id=? AND product_id=?').bind(updateId, productId).run();
+        if (!Number(deleted.meta?.changes || 0)) return fail(404, '系列更新不存在', 'UPDATE_NOT_FOUND');
+        await audit(env, 'series.update_deleted', updateId, product.title);
+        return json({ ok: true });
+      }
+      return fail(405, '不支持的操作', 'METHOD_NOT_ALLOWED');
     }
     const prodRoute = path.match(/^\/api\/admin\/products\/([A-Za-z0-9_\-]{1,64})$/);
     if (prodRoute) {
@@ -953,6 +1093,10 @@ async function route(request, env, ctx) {
       if (!existing) return fail(404, '商品不存在', 'PRODUCT_NOT_FOUND');
       if (method === 'PUT') {
         const body = await bodyJson(request);
+        // Older clients may omit the new product settings; editing must not reset them.
+        for (const field of ['product_kind', 'allow_repeat', 'subscription_days', 'update_frequency']) {
+          if (!Object.hasOwn(body, field)) body[field] = existing[field];
+        }
         // Older clients may omit the preview. Preserve it only while the delivery
         // link is unchanged, so an old snapshot cannot silently describe a new share.
         if (!Object.hasOwn(body, 'preview_files') && String(body.delivery_url || '').trim() === existing.delivery_url) {
@@ -967,8 +1111,11 @@ async function route(request, env, ctx) {
         const samePreview = JSON.stringify(v.preview_files) === JSON.stringify(storedPreview(existing.preview_files)) &&
           v.preview_source === existing.preview_source && v.preview_truncated === Number(existing.preview_truncated || 0) && v.delivery_url === existing.delivery_url;
         const previewTime = v.preview_files.length ? (samePreview ? existing.preview_updated_at : now()) : null;
-        await env.DB.prepare(`UPDATE products SET title=?,summary=?,description=?,price_points=?,cover_url=?,category_id=?,tags=?,delivery_type=?,delivery_text=?,delivery_url=?,file_key=?,file_name=?,stock=?,status=?,sort_order=?,updated_at=?,preview_files=?,preview_source=?,preview_updated_at=?,preview_truncated=? WHERE id=?`)
-          .bind(v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), JSON.stringify(v.preview_files), v.preview_source, previewTime, v.preview_truncated, pid).run();
+        const updated = await env.DB.prepare(`UPDATE products SET title=?,summary=?,description=?,price_points=?,cover_url=?,category_id=?,tags=?,delivery_type=?,delivery_text=?,delivery_url=?,file_key=?,file_name=?,stock=?,status=?,sort_order=?,updated_at=?,preview_files=?,preview_source=?,preview_updated_at=?,preview_truncated=?,product_kind=?,allow_repeat=?,subscription_days=?,update_frequency=?
+          WHERE id=? AND (product_kind=? OR (NOT EXISTS (SELECT 1 FROM orders WHERE product_id=products.id AND status IN ('PENDING','DELIVERED'))
+            AND NOT EXISTS (SELECT 1 FROM subscription_updates WHERE product_id=products.id)))`)
+          .bind(v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), JSON.stringify(v.preview_files), v.preview_source, previewTime, v.preview_truncated, v.product_kind, v.allow_repeat, v.subscription_days, v.update_frequency, pid, v.product_kind).run();
+        if (!Number(updated.meta?.changes || 0)) return fail(409, '已有订单或系列更新的商品不能更改类型', 'PRODUCT_KIND_LOCKED');
         await audit(env, 'goods.updated', pid, `${v.title} / ${v.status}`);
         await invalidatePublicCache(request, ['catalog']);
         const row = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(pid).first();
@@ -984,6 +1131,8 @@ async function route(request, env, ctx) {
           await invalidatePublicCache(request, ['catalog']);
           return json({ ok: true, hidden: true, message: '该商品有待确认或已完成订单，已改为下架以保留订单。' });
         }
+        // Updates are private to this product; no pending or completed orders exist here.
+        await env.DB.prepare('DELETE FROM subscription_updates WHERE product_id=?').bind(pid).run();
         await audit(env, 'goods.deleted', pid, existing.title);
         await invalidatePublicCache(request, ['catalog']);
         return json({ ok: true, deleted: true });
@@ -1033,7 +1182,7 @@ async function route(request, env, ctx) {
     }
     if (path === '/api/admin/status' && method === 'GET') {
       const state = await secretState(env);
-      return json({ apiKeyConfigured: state.apiKeySource !== 'none', webhookSecretConfigured: state.webhookSecretSource !== 'none', databaseConfigured: Boolean(env.DB), ...state });
+      return json({ apiKeyConfigured: state.apiKeySource !== 'none', webhookSecretConfigured: state.webhookSecretSource !== 'none', databaseConfigured: Boolean(env.DB), agentConfigured: agentConfigured(env), ...state });
     }
     if (path === '/api/admin/security' && method === 'GET') return json(await secretState(env));
     if (path === '/api/admin/api-key' && method === 'POST') {
@@ -1114,11 +1263,12 @@ async function route(request, env, ctx) {
           env.DB.prepare(`DELETE FROM sessions WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM purchase_intents WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM consumption_jobs WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM subscriptions WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM orders WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM bonus_wallets WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM users WHERE id=? AND ${noPending}`).bind(targetId, targetId),
         ]);
-        if (!Number(deleted[5]?.meta?.changes || 0)) return fail(409, '该用户有待确认订单，请先同步订单后再删除', 'USER_HAS_PENDING_ORDERS');
+        if (!Number(deleted[6]?.meta?.changes || 0)) return fail(409, '该用户有待确认订单，请先同步订单后再删除', 'USER_HAS_PENDING_ORDERS');
         // Ledger rows are retained as an immutable reconciliation trail.
         await audit(env, 'user.deleted', targetId, target.email);
         return json({ ok: true });

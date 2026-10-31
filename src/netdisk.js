@@ -3,8 +3,9 @@
 export const MAX_PREVIEW_FILES = 150;
 const QUARK_PAGE_SIZE = 50;
 const BAIDU_PAGE_SIZE = 100;
-const MAX_LIST_CALLS = 6;
-const MAX_DEPTH = 2; // root and one child level
+const MAX_LIST_CALLS = 12;
+const MAX_DEPTH = 4; // root and up to three child levels (plus a single Quark wrapper)
+const MAX_PREVIEW_PATH = 320;
 const MAX_JSON_BYTES = 1024 * 1024;
 const QUARK_HOSTS = ['drive-h.quark.cn', 'drive-pc.quark.cn'];
 const QUARK_PATH = '/1/clouddrive/share/sharepage/';
@@ -33,7 +34,7 @@ export function providerTags(tags, type, url, max = 8) {
 }
 
 function looksPrivate(text) {
-  return /https?:\/\/|(?:(?:pan|drive)\.quark\.cn|pan\.baidu\.com)|(?:提取码|访问码|访问密码|分享密码)/i.test(text);
+  return /(?:[a-z][a-z0-9+.-]{1,31}:\/\/|(?:magnet|ed2k|thunder|data|file):)|(?:(?:pan|drive)\.quark\.cn|pan\.baidu\.com)|(?:提取码|访问码|访问密码|分享密码)|\b(?:pwd|passcode|password|stoken|token|access[_-]?token)\s*[:=]/i.test(text);
 }
 
 // The preview is intentionally only a list of names, not links, IDs or tokens.
@@ -46,8 +47,8 @@ export function normalizePreview(input) {
   const seen = new Set();
   const items = [];
   for (const line of lines) {
-    if (line.length > 240 || /[\u0000-\u001f\u007f]/.test(line) || looksPrivate(line)) {
-      return { ok: false, error: '目录只能填写文件或文件夹名称（每项不超过 240 字），请勿包含链接或提取码' };
+    if (line.length > MAX_PREVIEW_PATH || /[\u0000-\u001f\u007f]/.test(line) || looksPrivate(line)) {
+      return { ok: false, error: `目录只能填写文件或文件夹名称（每项不超过 ${MAX_PREVIEW_PATH} 字），请勿包含链接或提取码` };
     }
     if (!seen.has(line)) { seen.add(line); items.push(line); }
   }
@@ -199,7 +200,7 @@ async function collectDirectory(provider, initial, list, makeChild, { expandSing
       const name = safeName(entry.name);
       if (!name) { truncated = true; continue; }
       const path = `${current.prefix}${name}${entry.directory ? '/' : ''}`;
-      if (path.length > 240) { truncated = true; continue; }
+      if (path.length > MAX_PREVIEW_PATH) { truncated = true; continue; }
       if (!seen.has(path)) { seen.add(path); items.push(path); }
       if (entry.directory) {
         if (childDepth < MAX_DEPTH) {

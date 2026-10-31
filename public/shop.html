@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>全部商品 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-3">
+<link rel="stylesheet" href="/storefront.css?v=20261031-5">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -91,25 +91,44 @@
     <div class="catalog-kicker">WHAT'S INSIDE <span>✳</span></div>
     <h2 id="previewTitle">资源目录</h2>
     <p id="previewMeta"></p>
-    <div class="catalog-note">这是供购买前参考的目录快照，内容可能随网盘更新；交付链接将在兑换后提供。</div>
-    <div class="catalog-list" id="previewList"></div>
+    <div class="catalog-note">仅展示管理员审核的名称快照，点击文件夹展开。目录可能不完整或随资源更新；下载链接不会在此公开。</div>
+    <div class="catalog-controls"><span>目录内容</span><div><button type="button" onclick="toggleCatalog(true)">全部展开</button><button type="button" onclick="toggleCatalog(false)">全部收起</button></div></div>
+    <div class="catalog-list catalog-tree" id="previewList"></div>
+  </div>
+</div>
+
+<div class="modal" id="purchaseModal" role="dialog" aria-modal="true" aria-labelledby="purchaseTitle">
+  <div class="modal-dialog purchase-dialog">
+    <button class="modal-close" aria-label="关闭确认" onclick="Store.setModal('#purchaseModal', false)">×</button>
+    <div class="modal-kicker">A LITTLE SOMETHING FOR YOU <span>✳</span></div>
+    <h2 id="purchaseTitle">确认兑换</h2><p>请确认商品与兑换条件，确认后才会扣减积分。</p>
+    <div class="purchase-product"><div class="purchase-symbol" aria-hidden="true">✦</div><div><small id="purchaseKind">数字商品</small><b id="purchaseName"></b></div><strong id="purchasePrice"></strong></div>
+    <div id="purchaseTerms" class="purchase-terms"></div>
+    <div class="purchase-actions"><button class="sbtn" type="button" onclick="Store.setModal('#purchaseModal', false)">再想想</button><button class="sbtn primary" id="confirmPurchase" type="button" onclick="submitPurchase(this)">确认兑换 <span aria-hidden="true">↗</span></button></div>
+    <div class="purchase-foot">优先使用店铺赠送积分，不足部分使用支付宝积分。</div>
   </div>
 </div>
 
 <div class="modal" id="deliveryModal" role="dialog" aria-modal="true" aria-labelledby="deliveryTitle">
   <div class="modal-dialog">
     <button class="modal-close" aria-label="关闭" onclick="Store.setModal('#deliveryModal', false)">×</button>
+    <div class="modal-kicker">SAVED TO YOUR COLLECTION <span>✳</span></div>
     <h2 id="deliveryTitle">兑换成功</h2>
     <p id="deliverySub">内容已保存到「我的已购」。</p>
     <div id="deliveryBody"></div>
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-3"></script>
+<script src="/storefront.js?v=20261031-5"></script>
 <script>
-const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, query } = Store;
+const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, query } = Store;
 let me = null, points = null, products = [], categories = [];
 let authReady = false, accessReady = false, catalogLoaded = false, isAdmin = false;
+let library = { owned_product_ids: [], subscriptions: [] }, libraryReady = false, libraryFailed = false;
+let purchaseDraft = null, purchaseInFlight = false;
+const subscriptionFor = id => (library.subscriptions || []).find(item => item.product_id === id);
+const subscriptionActive = sub => Boolean(sub && (sub.permanent || new Date(sub.expires_at).getTime() > Date.now()));
+const frequencyLabel = value => ({ DAILY: '每日更新', WEEKLY: '每周更新', IRREGULAR: '不定期更新' })[value] || '不定期更新';
 const params = query();
 const mobileFilters = window.matchMedia('(max-width: 760px)');
 function setFiltersExpanded(expanded) {
@@ -188,21 +207,29 @@ function renderProducts() {
     const soldOut = product.stock !== null && product.stock !== undefined && Number(product.stock) <= 0;
     const enough = points === null ? null : Number(points) >= Number(product.price_points);
     const checkingAccount = !authReady || (me && !accessReady);
-    const label = soldOut ? '已售罄' : (checkingAccount ? '确认账户中' : (!me ? '登录后兑换' : (enough === false ? '积分不足' : '立即兑换')));
+    const series = product.product_kind === 'SUBSCRIPTION', sub = subscriptionFor(product.id);
+    const owned = (library.owned_product_ids || []).includes(product.id);
+    const viewOwned = me && libraryReady && ((series && sub && (sub.permanent || soldOut)) || (!series && owned && (!product.allow_repeat || soldOut)));
+    const label = checkingAccount ? '确认账户中' : (libraryFailed && me ? '重试账户状态' : (!me ? '登录后兑换' : soldOut ? '已售罄' : enough === false ? '积分不足' : series ? (sub ? '手动续订' : '订阅系列') : owned ? '再次兑换' : '立即兑换'));
     const category = categoryLabel(product.category_id);
     const cover = productCover(product, index);
+    const subLabel = sub ? (sub.permanent ? '永久订阅' : (subscriptionActive(sub) ? '订阅中' : '已到期')) : '';
+    const seriesInfo = series ? `<div class="product-series"><span>↻ 系列订阅</span><span>${Number(product.subscription_days) ? Number(product.subscription_days) + ' 天 · 手动续费' : '永久有效'}</span><span>${esc(frequencyLabel(product.update_frequency))}</span></div>` : '';
     return `<article class="product-card">
       ${cover}
       <div class="product-body">
-        <div class="product-cat">${esc(category)}</div>
+        <div class="product-cat">${esc(category)} ${subLabel ? `<span class="owned-badge">${esc(subLabel)}</span>` : owned ? '<span class="owned-badge">已拥有</span>' : ''}</div>
         <h3>${esc(product.title)}</h3>
         <p class="summary">${esc(product.summary || '')}</p>
+        ${seriesInfo}
         <div class="product-tags">${(product.tags || []).slice(0, 4).map(tag => `<button class="product-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div>
-        ${(product.preview_files || []).length ? `<button class="catalog-trigger" data-preview="${esc(product.id)}"><span aria-hidden="true">▤</span> 查看资源目录 <small>${product.preview_files.length} 项${product.preview_truncated ? ' + ' : ''}</small><b aria-hidden="true">↗</b></button>` : ''}
+        ${(product.preview_files || []).length ? `<button class="catalog-trigger" data-preview="${esc(product.id)}"><span aria-hidden="true">▤</span> 查看资源目录 <small>${product.preview_files.length} 项${product.preview_truncated ? ' · 部分' : ''}</small><b aria-hidden="true">↗</b></button>` : ''}
         ${isAdmin ? `<a class="admin-edit-link" href="/admin?edit=${encodeURIComponent(product.id)}">✎ 编辑商品</a>` : ''}
         <div class="product-footer">
           <div><div class="price">${Number(product.price_points)} <small>积分</small></div><div class="stock-note">${product.stock === null || product.stock === undefined ? '不限量' : soldOut ? '已售罄' : '剩余 ' + Number(product.stock)}</div></div>
-          <button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut || checkingAccount ? 'disabled' : ''} data-buy="${esc(product.id)}">${label} <span aria-hidden="true">↗</span></button>
+          ${viewOwned ? `<a class="sbtn sm soft" href="/account?tab=${series ? 'subscriptions&product=' + encodeURIComponent(product.id) : 'orders'}">${series ? '查看订阅' : '查看已购'} ↗</a>`
+            : libraryFailed && me && !checkingAccount ? '<button class="sbtn sm" data-retry-library>重试账户状态 ↻</button>'
+            : `<button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut || checkingAccount ? 'disabled' : ''} data-buy="${esc(product.id)}">${label} <span aria-hidden="true">↗</span></button>`}
         </div>
       </div>
     </article>`;
@@ -242,73 +269,105 @@ async function loadAccess() {
   } catch {}
 }
 
+async function loadLibrary() {
+  if (!me) return;
+  try {
+    library = await api('/api/library');
+    libraryReady = true; libraryFailed = false;
+  } catch {
+    libraryReady = false; libraryFailed = true;
+  }
+}
+async function retryLibrary() {
+  accessReady = false; if (catalogLoaded) renderProducts();
+  await loadLibrary(); accessReady = true; if (catalogLoaded) renderProducts();
+  if (libraryFailed) toast('无法读取账户状态，请检查网络或重新登录');
+}
 async function refreshAfterPurchase() {
-  // Refresh inventory even if the independent balance request is slow.
   accessReady = false;
   if (catalogLoaded) renderProducts();
-  const access = loadAccess();
-  await loadData(null, true);
-  await access;
+  await Promise.all([loadAccess(), loadLibrary(), loadData(null, true)]);
   accessReady = true;
   if (catalogLoaded) renderProducts();
 }
-
-async function buyProduct(id, button) {
-  if (!me) {
-    location.href = '/account?next=' + encodeURIComponent(location.pathname + location.search);
-    return;
+function storedPurchase(id) {
+  const slot = `onepay:pending:${me.id}:${id}`;
+  let key = null, quote = null;
+  try { key = sessionStorage.getItem(slot); } catch {}
+  try { quote = JSON.parse(sessionStorage.getItem(slot + ':quote') || 'null'); } catch {}
+  return { slot, key, quote: quote?.idempotency_key === key ? quote : null };
+}
+function buyProduct(id) {
+  if (purchaseInFlight) return toast('订单处理中，请稍候');
+  if (!me) { location.href = '/account?next=' + encodeURIComponent(location.pathname + location.search); return; }
+  const product = products.find(item => item.id === id); if (!product) return;
+  if (!libraryReady) return toast('请先刷新账户状态');
+  const series = product.product_kind === 'SUBSCRIPTION', sub = subscriptionFor(id);
+  if ((!series && (library.owned_product_ids || []).includes(id) && !product.allow_repeat) || (series && sub?.permanent)) {
+    location.href = '/account?tab=' + (series ? 'subscriptions&product=' + encodeURIComponent(id) : 'orders'); return;
   }
-  const product = products.find(item => item.id === id);
-  if (!product) return;
-  if (points !== null && points < Number(product.price_points)) {
-    toast('积分不足，请先在个人中心充值');
-    setTimeout(() => { location.href = '/account?tab=recharge'; }, 600);
-    return;
+  const previous = storedPurchase(id);
+  if (!previous.key && points !== null && points < Number(product.price_points)) {
+    toast('积分不足，请先在个人中心充值'); setTimeout(() => { location.href = '/account?tab=recharge'; }, 600); return;
   }
-  if (!confirm(`用 ${product.price_points} 积分兑换「${product.title}」？\n优先使用店铺赠送积分，不足部分使用支付宝积分；内容会保存到「我的已购」。`)) return;
+  const quote = previous.quote || { expected_price: Number(product.price_points), expected_kind: series ? 'SUBSCRIPTION' : 'SINGLE',
+    expected_days: series ? Number(product.subscription_days || 0) : 0, subscription_revision: series ? (sub?.revision || 'none') : null };
+  purchaseDraft = { id, product, series, sub, previous, quote };
+  $('#purchaseTitle').textContent = previous.key ? '继续上次兑换' : (series ? (sub ? '确认手动续订' : '确认订阅系列') : '确认兑换');
+  $('#purchaseName').textContent = product.title;
+  $('#purchaseKind').textContent = series ? '持续更新系列' : '数字商品';
+  $('#purchasePrice').textContent = quote.expected_price + ' 积分';
+  const term = series ? (quote.expected_days ? `${quote.expected_days} 天有效 · ${sub && subscriptionActive(sub) ? '从原到期日顺延' : '从开通时起计算'}` : '永久有效') : (product.allow_repeat ? '此商品允许重复兑换' : '每个账号仅可兑换一次');
+  $('#purchaseTerms').innerHTML = `<div><span>兑换规则</span><b>${esc(term)}</b></div>${series ? `<div><span>更新频率</span><b>${esc(frequencyLabel(product.update_frequency))}</b></div><p>仅手动续费，不会自动扣费。有效期内可查看历史和新增更新；已下载文件或已复制的外部链接无法收回。</p>` : '<p>确认后内容会保存至「我的已购」。</p>'}${previous.key ? '<p class="pending-warning">存在未确认的操作：将使用原订单编号重试或查询；如此前未提交成功，将按已确认条件尝试兑换。</p>' : ''}`;
+  $('#confirmPurchase').textContent = previous.key ? '继续确认' : (series && sub ? '确认续订' : '确认兑换');
+  setModal('#purchaseModal', true, '#confirmPurchase');
+}
+function setPurchaseBusy(busy) {
+  const modal = $('#purchaseModal');
+  if (busy) modal.setAttribute('aria-busy', 'true'); else modal.removeAttribute('aria-busy');
+  modal.querySelector('.modal-close').disabled = busy;
+  modal.querySelector('.purchase-actions .sbtn:not(#confirmPurchase)').disabled = busy;
+}
+async function submitPurchase(button) {
+  if (!purchaseDraft || purchaseInFlight || button.disabled) return;
+  const draft = purchaseDraft; purchaseInFlight = true; setPurchaseBusy(true);
   return withBusy(button, async () => {
-    // Keep the original operation ID across network failures and page reloads.
-    const pendingKey = `onepay:pending:${me.id}:${id}`;
-    let key;
-    try { key = sessionStorage.getItem(pendingKey); } catch {}
-    key ||= 'ord-' + crypto.randomUUID();
-    try { sessionStorage.setItem(pendingKey, key); } catch {}
+    const modal = $('#purchaseModal'); modal.setAttribute('tabindex', '-1'); modal.focus({ preventScroll: true });
+    const { slot, key: previousKey, quote: previousQuote } = draft.previous;
+    const key = previousKey || 'ord-' + crypto.randomUUID();
+    const payload = previousQuote || { ...draft.quote, idempotency_key: key };
+    try { sessionStorage.setItem(slot, key); sessionStorage.setItem(slot + ':quote', JSON.stringify(payload)); } catch {}
     try {
-      const result = await api(`/api/products/${encodeURIComponent(id)}/purchase`, {
-        method: 'POST',
-        body: JSON.stringify({ idempotency_key: key })
-      });
+      const result = await api(`/api/products/${encodeURIComponent(draft.id)}/purchase`, { method: 'POST', body: JSON.stringify(payload),
+        signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30000) : undefined });
+      setPurchaseBusy(false); setModal('#purchaseModal', false);
       if (result.delivery) {
-        try { sessionStorage.removeItem(pendingKey); } catch {}
-        $('#deliveryTitle').textContent = '兑换成功 · ' + (result.order?.title || '');
-        $('#deliverySub').textContent = `已扣减 ${result.order?.price_points ?? ''} 积分，订单号 ${result.order?.order_no || ''}`;
+        try { sessionStorage.removeItem(slot); sessionStorage.removeItem(slot + ':quote'); } catch {}
+        $('#deliveryTitle').textContent = (draft.series ? '订阅已开通 · ' : '兑换成功 · ') + (result.order?.title || '');
+        $('#deliverySub').textContent = `已扣减 ${result.order?.price_points ?? ''} 积分 · 订单号 ${result.order?.order_no || ''}`;
         $('#deliveryBody').innerHTML = deliveryHtml(result.delivery) || '<div class="notice-line">该商品暂无交付内容，请联系管理员。</div>';
         setModal('#deliveryModal', true, '.modal-close');
-      } else {
-        toast(result.message || '扣减结果待确认，请稍后在个人中心同步');
-      }
+      } else toast(result.message || '扣减结果待确认，请稍后在个人中心同步');
       await refreshAfterPurchase();
     } catch (error) {
-      if (error.status && error.status < 500) { try { sessionStorage.removeItem(pendingKey); } catch {} }
-      toast(error.status ? error.message : '兑换结果暂不确定，请重试或在「我的已购」同步');
+      if (error.status && error.status < 500) { try { sessionStorage.removeItem(slot); sessionStorage.removeItem(slot + ':quote'); } catch {} }
+      setPurchaseBusy(false); setModal('#purchaseModal', false);
+      toast(error.status ? error.message : '兑换结果暂不确定，请使用原编号重试或在「我的已购」同步');
       await refreshAfterPurchase();
-    }
+    } finally { purchaseInFlight = false; setPurchaseBusy(false); }
   });
 }
-
 function showCatalog(id) {
   const product = products.find(item => item.id === id);
   if (!product || !Array.isArray(product.preview_files)) return;
   $('#previewTitle').textContent = product.title + ' · 资源目录';
   const updated = product.preview_updated_at ? new Date(product.preview_updated_at).toLocaleDateString('zh-CN') : '未记录';
   $('#previewMeta').textContent = `${product.preview_files.length} 项${product.preview_truncated ? ' · 部分目录' : ''} · 更新于 ${updated}`;
-  $('#previewList').innerHTML = product.preview_files.map(path => {
-    const folder = path.endsWith('/');
-    const depth = Math.min(3, Math.max(0, path.replace(/\/$/, '').split('/').length - 1));
-    return `<div class="catalog-item ${folder ? 'is-folder' : ''}" style="--depth:${depth}"><span aria-hidden="true">${folder ? '▰' : '▤'}</span><span>${esc(path)}</span></div>`;
-  }).join('');
+  $('#previewList').innerHTML = catalogTreeHtml(product.preview_files);
   setModal('#previewModal', true, '.modal-close');
 }
+
+function toggleCatalog(open) { $$('#previewList details').forEach(node => { node.open = open; }); }
 
 $('#categoryFilters').addEventListener('click', event => {
   const button = event.target.closest('[data-category]');
@@ -338,9 +397,11 @@ $('#productGrid').addEventListener('click', event => {
   const buy = event.target.closest('[data-buy]');
   const clear = event.target.closest('[data-clear]');
   const preview = event.target.closest('[data-preview]');
+  const retry = event.target.closest('[data-retry-library]');
   if (tag) toggleTag(tag.dataset.tag);
   else if (buy) buyProduct(buy.dataset.buy, buy);
   else if (preview) showCatalog(preview.dataset.preview);
+  else if (retry) retryLibrary();
   else if (clear) clearFilter(clear.dataset.clear, clear.dataset.value);
 });
 $('#activeFilters').addEventListener('click', event => {
@@ -374,7 +435,7 @@ $('#year').textContent = new Date().getFullYear();
   if (me?.role === 'admin') isAdmin = true;
   authReady = true;
   if (catalogLoaded) renderProducts();
-  if (me) await loadAccess();
+  if (me) await Promise.all([loadAccess(), loadLibrary()]);
   accessReady = true;
   if (catalogLoaded) renderProducts();
   await Promise.all([catalog, admin]);

@@ -45,26 +45,38 @@
 
   function setModal(target, open, focusSelector) {
     const modal = typeof target === 'string' ? $(target) : target;
-    if (!modal) return;
+    if (!modal || (!open && modal.getAttribute('aria-busy') === 'true')) return;
     if (open) {
       modal._lastFocus = document.activeElement;
       modal.classList.add('show');
       document.body.classList.add('modal-open');
       requestAnimationFrame(() => {
+        if (!modal.classList.contains('show')) return;
         const focusable = focusSelector ? modal.querySelector(focusSelector) : modal.querySelector('button, input, a');
         focusable?.focus({ preventScroll: true });
       });
     } else {
       modal.classList.remove('show');
+      if (typeof modal._onClose === 'function') modal._onClose();
       if (!$('.modal.show')) document.body.classList.remove('modal-open');
       if (modal._lastFocus?.isConnected) modal._lastFocus.focus({ preventScroll: true });
     }
   }
 
   document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
     const open = $$('.modal.show');
-    if (open.length) setModal(open[open.length - 1], false);
+    const modal = open[open.length - 1];
+    if (!modal) return;
+    if (event.key === 'Escape') { event.preventDefault(); setModal(modal, false); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = $$('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex="-1"])', modal)
+      .filter(node => node.getClientRects().length);
+    if (!focusable.length) {
+      event.preventDefault(); modal.setAttribute('tabindex', '-1'); modal.focus({ preventScroll: true }); return;
+    }
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
   });
 
   function fmtTime(value) {
@@ -150,22 +162,49 @@
 
   function deliveryHtml(delivery) {
     if (!delivery) return '';
+    if (delivery.type === 'SUBSCRIPTION') {
+      return `<div class="delivery-block subscription-delivery"><div class="delivery-symbol" aria-hidden="true">↻</div><div><b>订阅权益已记录</b><p>前往「我的订阅」查看系列更新与有效期。</p><a class="sbtn sm primary" href="/account?tab=subscriptions&product=${encodeURIComponent(delivery.product_id || '')}">查看我的订阅 <span aria-hidden="true">↗</span></a></div></div>`;
+    }
     if (delivery.type === 'TEXT') {
-      return `<div class="delivery-block"><div class="delivery-label">交付文本</div>
+      return `<div class="delivery-block"><div class="delivery-label"><span aria-hidden="true">✧</span> 交付文本</div>
         <pre class="text-output">${esc(delivery.text)}</pre>
-        <button class="sbtn sm" style="margin-top:8px" data-copy="${esc(delivery.text)}">复制文本</button></div>`;
+        <button class="sbtn sm soft delivery-copy" data-copy="${esc(delivery.text)}">复制文本</button></div>`;
     }
     if (delivery.type === 'LINK') {
-      return `<div class="delivery-block"><div class="delivery-label">交付链接</div>
-        <div class="link-output"><a href="${esc(delivery.url)}" target="_blank" rel="noopener noreferrer">${esc(delivery.url)}</a>
-        <button class="sbtn sm" data-copy="${esc(delivery.url)}">复制</button></div></div>`;
+      return `<div class="delivery-block"><div class="delivery-label"><span aria-hidden="true">↗</span> 交付链接</div>
+        <div class="link-output"><a class="delivery-url" href="${esc(delivery.url)}" target="_blank" rel="noopener noreferrer">${esc(delivery.url)}</a>
+        <button class="sbtn sm soft" data-copy="${esc(delivery.url)}">复制链接</button></div></div>`;
     }
     if (delivery.type === 'FILE' && delivery.file) {
-      return `<div class="delivery-block"><div class="delivery-label">交付文件</div>
-        <div class="link-output"><span>${esc(delivery.file.name)}</span>
-        <a class="sbtn sm primary" href="${esc(delivery.file.download_path)}">下载文件</a></div></div>`;
+      return `<div class="delivery-block"><div class="delivery-label"><span aria-hidden="true">↓</span> 交付文件</div>
+        <div class="link-output file-output"><span class="file-icon" aria-hidden="true">▤</span><span class="file-name">${esc(delivery.file.name)}</span>
+        <a class="sbtn sm primary" href="${esc(delivery.file.download_path)}">下载文件 ↓</a></div></div>`;
     }
     return '';
+  }
+
+  // The server sends only reviewed names. Implicit folders are reconstructed
+  // from paths; filenames are escaped and never interpreted as markup.
+  function catalogTreeHtml(paths) {
+    const root = { children: new Map() };
+    for (const raw of Array.isArray(paths) ? paths : []) {
+      if (typeof raw !== 'string') continue;
+      const folder = raw.endsWith('/');
+      const parts = raw.split('/').filter(Boolean);
+      let parent = root;
+      parts.forEach((name, index) => {
+        const isFolder = index < parts.length - 1 || folder;
+        const key = (isFolder ? 'd:' : 'f:') + name;
+        if (!parent.children.has(key)) parent.children.set(key, { name, folder: isFolder, children: new Map() });
+        parent = parent.children.get(key);
+      });
+    }
+    const folderIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/></svg>';
+    const fileIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 13h6M9 17h6"/></svg>';
+    const render = node => [...node.children.values()].map(item => item.folder
+      ? `<details class="tree-folder"><summary><span class="tree-chevron" aria-hidden="true">›</span><span class="tree-icon">${folderIcon}</span><span class="tree-name">${esc(item.name)}</span><small>${item.children.size ? item.children.size + ' 项' : ''}</small></summary><div class="tree-children">${item.children.size ? render(item) : '<div class="tree-empty">暂无可展示的子项</div>'}</div></details>`
+      : `<div class="tree-file"><span class="tree-spacer"></span><span class="tree-icon">${fileIcon}</span><span class="tree-name">${esc(item.name)}</span></div>`).join('');
+    return render(root) || '<div class="tree-empty">暂无目录</div>';
   }
 
   async function copyText(text) {
@@ -187,5 +226,5 @@
     return new URLSearchParams(location.search);
   }
 
-  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, copyText, query };
+  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, copyText, query };
 })();

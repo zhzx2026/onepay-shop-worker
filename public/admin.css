@@ -75,3 +75,28 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .catalog-editor { margin:8px 0 2px; }.catalog-tools { display:flex; align-items:end; gap:10px; }.catalog-tools .field { flex:1; }.catalog-tools .btn { white-space:nowrap; }.catalog-editor .field { margin:0; }.catalog-editor .hint { line-height:1.7; }
 .generated-cover { display:flex; align-items:center; gap:14px; padding:10px; border:1px solid #e9e3f4; border-radius:10px; background:#fff; }.generated-cover img { width:116px; height:76px; border-radius:8px; object-fit:cover; background:#f1edf8; }.generated-cover > div { display:grid; gap:5px; }.generated-cover b { font-size:11px; }.generated-cover span { color:#99909f; font-size:10px; }.generated-cover button { width:max-content; }
 @media(max-width:600px) { .catalog-tools { align-items:stretch; flex-direction:column; }.catalog-tools .btn { width:100%; }.generated-cover img { width:90px; height:68px; } }
+
+/* Subscription configuration, content management and Agent guidance. */
+.series-terms, .series-manager { margin: 18px 0; padding: 20px; border: 1px solid #e7e1f3; border-radius: 14px; background: #faf8fe; }
+.series-terms-title { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.series-terms-title > span { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; color: #755bd1; background: #ede7fc; font-size: 22px; }
+.series-terms-title b, .series-terms-title small, .series-update-row small { display: block; }
+.series-terms-title small, .series-update-row small { margin-top: 3px; color: #938b9e; font-size: 11px; }
+.series-manager { margin-top: 25px; background: #fff; }
+.series-eyebrow { margin-bottom: 5px; color: #9a87cc; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+.series-editor { padding: 18px; border: 1px solid #eee9f5; border-radius: 12px; background: #fbfaff; }
+.series-updates { display: grid; gap: 8px; margin-top: 14px; }
+.series-update-row { display: flex; align-items: center; gap: 12px; padding: 13px; border: 1px solid #f0edf5; border-radius: 10px; }
+.series-update-row > div:first-child { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.series-update-row .row-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.agent-state { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+.agent-state span { padding: 7px 11px; border-radius: 8px; background: #f4f1fb; color: #6b58ae; font-size: 12px; font-weight: 700; }
+.agent-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-bottom: 18px; }
+.agent-steps > div { display: flex; gap: 11px; padding: 15px; border: 1px solid #eee9f5; border-radius: 11px; }
+.agent-steps b { color: #aa98d5; font-size: 12px; }.agent-steps span { font-weight: 750; }.agent-steps small { display: block; margin-top: 4px; color: #968d9e; font-size: 11px; font-weight: 400; overflow-wrap: anywhere; }
+.agent-panel .notice-line { padding: 13px 15px; border-radius: 10px; background: #f9f7fc; color: #81758c; font-size: 12px; line-height: 1.7; }
+.agent-preview { margin-top: 16px; color: #74629e; font-size: 12px; }.agent-preview summary { cursor: pointer; }.agent-preview pre { max-height: 350px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid #eee9f5; border-radius: 10px; color: #625a6e; background: #faf9fc; line-height: 1.7; }
+.nav-icon { display: grid; place-items: center; width: 19px; height: 19px; flex: 0 0 19px; }
+.nav-icon svg { display: block; width: 19px; height: 19px; flex: none; }
+@media (max-width: 760px) { .series-terms, .series-manager { padding: 15px; }.series-update-row { flex-wrap: wrap; }.series-update-row .row-actions { width: 100%; }.agent-steps { grid-template-columns: 1fr; }.agent-steps > div { padding: 11px; } }
+.checkline { display: inline-flex !important; align-items: center; gap: 7px; margin-top: 5px; color: #80758f; font-size: 11px; font-weight: 600; }.checkline input[type=checkbox] { width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: #7259c7; }
