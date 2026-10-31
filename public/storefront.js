@@ -6,7 +6,9 @@
   async function api(path, options = {}) {
     const headers = { ...(options.headers || {}) };
     if (options.body !== undefined && !(options.body instanceof FormData)) headers['content-type'] = 'application/json';
-    const response = await fetch(path, { cache: 'no-store', ...options, headers });
+    const method = String(options.method || 'GET').toUpperCase();
+    const publicRead = method === 'GET' && /^\/api\/(?:products|categories|config|product)(?:\?|$)/.test(path);
+    const response = await fetch(path, { ...options, cache: publicRead ? (options.cache ?? 'default') : 'no-store', headers });
     let data = {};
     try { data = await response.json(); } catch {}
     if (!response.ok) throw Object.assign(new Error(data.error || '请求失败'), { data, status: response.status });

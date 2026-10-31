@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f8f7fc">
 <title>个人中心 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261030-2">
+<link rel="stylesheet" href="/storefront.css?v=20261031-2">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -72,7 +72,7 @@
     </div>
 
     <div class="stats">
-      <div class="stat"><span>当前积分 <i>✳</i></span><b id="statPoints">—</b><small>可用于兑换的积分</small></div>
+      <div class="stat"><span>当前积分 <i>✳</i></span><b id="statPoints">—</b><small id="pointsBreakdown">正在读取积分来源</small></div>
       <div class="stat"><span>已使用积分 <i>↗</i></span><b id="statUsed">—</b><small>累计兑换所用积分</small></div>
       <div class="stat"><span>已购内容 <i>♡</i></span><b id="statOrders">—</b><small>保存在你的账户中</small></div>
     </div>
@@ -91,7 +91,7 @@
             <button class="sbtn sm" onclick="loadPlans(this)">刷新套餐</button>
           </div>
           <div class="plan-grid" id="planGrid"><div class="empty-state">正在读取充值套餐…</div></div>
-          <div class="notice-line" style="margin-top:14px">充值入口由一人付提供。打开支付宝完成付款后，返回这里刷新积分余额。</div>
+          <div class="notice-line" style="margin-top:14px">店铺赠送积分与支付宝积分分开记账，兑换时优先使用赠送积分，不足部分再使用支付宝积分。充值入口由一人付提供，付款后请刷新余额。</div>
         </div>
       </div>
 
@@ -159,7 +159,7 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261030-2"></script>
+<script src="/storefront.js?v=20261031-2"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
 let me = null, points = null, authMode = 'login';
@@ -232,20 +232,19 @@ async function logout() {
 async function loadAccess() {
   try {
     const data = await api('/api/access');
-    if (data.requires_consumption) {
-      points = Number(data.remaining ?? 0);
-      $('#statPoints').textContent = points;
-      $('#statUsed').textContent = Number(data.used ?? 0);
-      setPoints(points);
-    } else {
-      points = null;
-      $('#statPoints').textContent = '—';
-      $('#statUsed').textContent = '—';
-      toast('一人付当前不是积分模式，暂时无法兑换商品');
-    }
+    const bonus = Number(data.bonus_points || 0);
+    points = Number.isFinite(data.total_points) ? data.total_points : null;
+    $('#statPoints').textContent = points === null ? (bonus ? bonus + ' + ?' : '—') : points;
+    $('#pointsBreakdown').textContent = data.upstream_available
+      ? `店铺赠送 ${bonus} · 支付宝 ${data.onepay_points === null ? '未知' : Number(data.onepay_points || 0)}${data.access_granted === false && data.onepay_points ? '（当前不可用）' : ''}`
+      : `店铺赠送 ${bonus} · 支付宝积分暂不可用`;
+    $('#statUsed').textContent = Number.isFinite(data.used) ? data.used + Number(data.bonus_used || 0) : (data.bonus_used ? data.bonus_used + ' + ?' : '—');
+    setPoints(points);
   } catch (error) {
+    points = null;
     $('#statPoints').textContent = '—';
     $('#statUsed').textContent = '—';
+    $('#pointsBreakdown').textContent = '积分暂不可用';
     toast(error.message);
   }
 }
@@ -263,7 +262,7 @@ async function loadPlans(button) {
   return withBusy(button, async () => {
     const grid = $('#planGrid');
     try {
-      const data = await api('/api/product');
+      const data = await api('/api/product', button ? { cache: 'no-store' } : {});
       const options = Array.isArray(data.charging_options) ? data.charging_options : [];
       $('#planStatus').textContent = `${modeLabel(data.billing_mode)} · 状态 ${data.capability_status || '未知'}`;
       if (!options.length) {
@@ -271,11 +270,11 @@ async function loadPlans(button) {
         return;
       }
       const open = data.capability_status === 'ENABLED';
-      grid.innerHTML = options.map((option, index) => `<article class="plan-card">
+      grid.innerHTML = options.map(option => `<article class="plan-card">
         <div class="plan-name">${esc(option.display_name || '积分套餐')}</div>
         <div class="plan-detail">${esc(planDetail(option))}</div>
         <div class="plan-price">${esc(option.price || '—')} <small>${esc(option.currency || 'CNY')}</small></div>
-        <button class="sbtn sm ${index === 0 ? 'primary' : ''}" ${open ? '' : 'disabled'} onclick="buyPoints('${esc(option.sku_id || '')}', this)">${open ? '支付宝充值' : '暂不可购买'}</button>
+        <button class="sbtn sm primary" ${open ? '' : 'disabled'} onclick="buyPoints('${esc(option.sku_id || '')}', this)">${open ? '支付宝充值' : '暂不可购买'}</button>
       </article>`).join('');
     } catch (error) {
       grid.innerHTML = `<div class="empty-state"><b>暂时无法读取充值套餐</b>${esc(error.message)}</div>`;
@@ -316,7 +315,11 @@ async function loadOrders(button) {
     try {
       const data = await api('/api/orders');
       const items = data.items || [];
-      $('#statOrders').textContent = items.length;
+      $('#statOrders').textContent = items.filter(order => order.status === 'DELIVERED').length;
+      // Clear only this exact settled operation, never a newer pending purchase.
+      for (const order of items) if (order.status !== 'PENDING') {
+        try { const key = `onepay:pending:${me.id}:${order.product_id}`; if (sessionStorage.getItem(key) === order.key) sessionStorage.removeItem(key); } catch {}
+      }
       if (!items.length) {
         $('#orderList').innerHTML = '<div class="empty-state"><b>还没有已购内容</b>去商品页挑一件需要的吧。<div class="actions" style="justify-content:center;margin-top:12px"><a class="sbtn sm primary" href="/shop">浏览商品</a></div></div>';
         return;
@@ -326,7 +329,7 @@ async function loadOrders(button) {
           : order.status === 'PENDING' ? '<span class="status-pill wait">待确认</span>' : '<span class="status-pill bad">失败</span>';
         return `<article class="order-card">
           <div class="order-top">
-            <div><h4>${esc(order.title)}</h4><div class="order-meta">${esc(order.order_no)} · ${Number(order.price_points)} 积分 · ${esc(fmtTime(order.created_at))}</div></div>
+            <div><h4>${esc(order.title)}</h4><div class="order-meta">${esc(order.order_no)} · ${Number(order.price_points)} 积分 · ${esc(fmtTime(order.created_at))}</div><div class="order-meta">${order.status === 'FAILED' ? '兑换未完成，预留赠送积分已退回' : `${order.status === 'PENDING' ? '预留' : '积分来源'}：赠送 ${Number(order.bonus_points_used || 0)} · 支付宝 ${Number(order.onepay_points_used || 0)}${order.status === 'PENDING' ? '（待确认）' : ''}`}</div></div>
             ${pill}
           </div>
           ${order.status === 'PENDING' ? '<div class="delivery-block"><div class="order-meta">扣减结果尚未确认，点击「同步待确认订单」查询，不会重复扣积分。</div></div>' : deliveryHtml(order.delivery)}

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f8f7fc">
 <title>全部商品 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261030-2">
+<link rel="stylesheet" href="/storefront.css?v=20261031-2">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -93,10 +93,11 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261030-2"></script>
+<script src="/storefront.js?v=20261031-2"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, query } = Store;
 let me = null, points = null, products = [], categories = [];
+let authReady = false, accessReady = false, catalogLoaded = false, isAdmin = false;
 const params = query();
 const mobileFilters = window.matchMedia('(max-width: 760px)');
 function setFiltersExpanded(expanded) {
@@ -174,7 +175,8 @@ function renderProducts() {
   $('#productGrid').innerHTML = list.map((product, index) => {
     const soldOut = product.stock !== null && product.stock !== undefined && Number(product.stock) <= 0;
     const enough = points === null ? null : Number(points) >= Number(product.price_points);
-    const label = soldOut ? '已售罄' : (!me ? '登录后兑换' : (enough === false ? '积分不足' : '立即兑换'));
+    const checkingAccount = !authReady || (me && !accessReady);
+    const label = soldOut ? '已售罄' : (checkingAccount ? '确认账户中' : (!me ? '登录后兑换' : (enough === false ? '积分不足' : '立即兑换')));
     const category = categoryLabel(product.category_id);
     const cover = productCover(product, index);
     return `<article class="product-card">
@@ -184,9 +186,10 @@ function renderProducts() {
         <h3>${esc(product.title)}</h3>
         <p class="summary">${esc(product.summary || '')}</p>
         <div class="product-tags">${(product.tags || []).slice(0, 4).map(tag => `<button class="product-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div>
+        ${isAdmin ? `<a class="admin-edit-link" href="/admin?edit=${encodeURIComponent(product.id)}">✎ 编辑商品</a>` : ''}
         <div class="product-footer">
           <div><div class="price">${Number(product.price_points)} <small>积分</small></div><div class="stock-note">${product.stock === null || product.stock === undefined ? '不限量' : soldOut ? '已售罄' : '剩余 ' + Number(product.stock)}</div></div>
-          <button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut ? 'disabled' : ''} data-buy="${esc(product.id)}">${label} <span aria-hidden="true">↗</span></button>
+          <button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut || checkingAccount ? 'disabled' : ''} data-buy="${esc(product.id)}">${label} <span aria-hidden="true">↗</span></button>
         </div>
       </div>
     </article>`;
@@ -200,14 +203,17 @@ function applyState() {
   syncUrl();
 }
 
-async function loadData(button) {
+async function loadData(button, fresh = false) {
   return withBusy(button, async () => {
     try {
-      const [categoryData, productData] = await Promise.all([api('/api/categories'), api('/api/products')]);
+      const options = fresh ? { cache: 'no-store' } : {};
+      const [categoryData, productData] = await Promise.all([api('/api/categories', options), api('/api/products', options)]);
       categories = categoryData.items || [];
       products = productData.items || [];
+      catalogLoaded = true;
       applyState();
     } catch (error) {
+      catalogLoaded = false;
       $('#productGrid').innerHTML = `<div class="empty-state"><b>商品读取失败</b>${esc(error.message)}</div>`;
       $('#resultCount').textContent = '读取失败';
     }
@@ -218,9 +224,20 @@ async function loadAccess() {
   if (!me) return;
   try {
     const data = await api('/api/access');
-    points = data.requires_consumption ? Number(data.remaining ?? 0) : null;
+    points = Number.isFinite(data.total_points) ? data.total_points : null;
     setPoints(points);
   } catch {}
+}
+
+async function refreshAfterPurchase() {
+  // Refresh inventory even if the independent balance request is slow.
+  accessReady = false;
+  if (catalogLoaded) renderProducts();
+  const access = loadAccess();
+  await loadData(null, true);
+  await access;
+  accessReady = true;
+  if (catalogLoaded) renderProducts();
 }
 
 async function buyProduct(id, button) {
@@ -235,14 +252,21 @@ async function buyProduct(id, button) {
     setTimeout(() => { location.href = '/account?tab=recharge'; }, 600);
     return;
   }
-  if (!confirm(`用 ${product.price_points} 积分兑换「${product.title}」？\n兑换后积分立即扣减，内容会保存到「我的已购」。`)) return;
+  if (!confirm(`用 ${product.price_points} 积分兑换「${product.title}」？\n优先使用店铺赠送积分，不足部分使用支付宝积分；内容会保存到「我的已购」。`)) return;
   return withBusy(button, async () => {
+    // Keep the original operation ID across network failures and page reloads.
+    const pendingKey = `onepay:pending:${me.id}:${id}`;
+    let key;
+    try { key = sessionStorage.getItem(pendingKey); } catch {}
+    key ||= 'ord-' + crypto.randomUUID();
+    try { sessionStorage.setItem(pendingKey, key); } catch {}
     try {
       const result = await api(`/api/products/${encodeURIComponent(id)}/purchase`, {
         method: 'POST',
-        body: JSON.stringify({ idempotency_key: 'ord-' + crypto.randomUUID() })
+        body: JSON.stringify({ idempotency_key: key })
       });
       if (result.delivery) {
+        try { sessionStorage.removeItem(pendingKey); } catch {}
         $('#deliveryTitle').textContent = '兑换成功 · ' + (result.order?.title || '');
         $('#deliverySub').textContent = `已扣减 ${result.order?.price_points ?? ''} 积分，订单号 ${result.order?.order_no || ''}`;
         $('#deliveryBody').innerHTML = deliveryHtml(result.delivery) || '<div class="notice-line">该商品暂无交付内容，请联系管理员。</div>';
@@ -250,10 +274,11 @@ async function buyProduct(id, button) {
       } else {
         toast(result.message || '扣减结果待确认，请稍后在个人中心同步');
       }
-      await loadAccess();
-      await loadData();
+      await refreshAfterPurchase();
     } catch (error) {
-      toast(error.message);
+      if (error.status && error.status < 500) { try { sessionStorage.removeItem(pendingKey); } catch {} }
+      toast(error.status ? error.message : '兑换结果暂不确定，请重试或在「我的已购」同步');
+      await refreshAfterPurchase();
     }
   });
 }
@@ -302,10 +327,23 @@ $('#searchInput').value = state.q;
 $('#year').textContent = new Date().getFullYear();
 
 (async () => {
+  // Catalog and authentication are independent; do not block the shelf on balance lookup.
+  const catalog = loadData();
+  const admin = api('/api/admin/me').then(data => {
+    if (data.authenticated && data.user?.role === 'admin') {
+      isAdmin = true;
+      if (catalogLoaded) renderProducts();
+    }
+  }).catch(() => {});
   const chrome = await initChrome('shop');
   me = chrome.me;
-  await loadAccess();
-  await loadData();
+  if (me?.role === 'admin') isAdmin = true;
+  authReady = true;
+  if (catalogLoaded) renderProducts();
+  if (me) await loadAccess();
+  accessReady = true;
+  if (catalogLoaded) renderProducts();
+  await Promise.all([catalog, admin]);
 })();
 </script>
 </body>

@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "wrangler dev --ip 0.0.0.0",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js",
-    "test": "node --test"
+    "check": "node --check src/index.js && node --check src/cache.js && node --check src/bonus.js && node --check public/storefront.js",
+    "test": "node --test",
+    "build:editor": "node scripts/build-editor.mjs",
+    "predev": "npm run build:editor",
+    "predeploy": "npm run build:editor"
   },
   "devDependencies": {
+    "esbuild": "0.27.3",
+    "monaco-editor": "0.52.2",
     "wrangler": "4.86.0"
   }
 }

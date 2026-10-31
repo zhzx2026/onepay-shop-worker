@@ -1,0 +1,2 @@
+# Third-party Monaco bundles contain whitespace inside JavaScript string literals.
+public/vendor/monaco/* linguist-generated=true -whitespace
