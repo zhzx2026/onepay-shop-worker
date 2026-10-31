@@ -1,4 +1,5 @@
-import { cachedPublicJson, invalidatePublicCache, withStaticCache } from './cache.js';
+import { cachedPublicJson, invalidatePublicCache, withStaticCache, productTagFilters } from './cache.js';
+import { detectNetdisk, providerTags, normalizePreview, readShareDirectory } from './netdisk.js';
 import { bonusBalance, bonusHistory, adjustBonus, reserveOrder, refundOrder } from './bonus.js';
 
 const API = 'https://ai6666.com/opcpay/api/pay/v1';
@@ -350,7 +351,15 @@ async function productCategoryOk(env, categoryId) {
   return Boolean(await env.DB.prepare('SELECT id FROM categories WHERE id=?').bind(categoryId).first());
 }
 
+function storedPreview(value) {
+  try {
+    const parsed = normalizePreview(JSON.parse(value || '[]'));
+    return parsed.ok ? parsed.items : [];
+  } catch { return []; }
+}
+
 function publicProduct(p) {
+  const provider = p.delivery_type === 'LINK' ? detectNetdisk(p.delivery_url) : null;
   return {
     id: p.id,
     title: p.title,
@@ -359,7 +368,12 @@ function publicProduct(p) {
     price_points: p.price_points,
     cover_url: p.cover_url,
     category_id: p.category_id || '',
-    tags: parseTags(p.tags),
+    tags: providerTags(parseTags(p.tags), p.delivery_type, p.delivery_url, MAX_PRODUCT_TAGS),
+    provider: provider ? { id: provider.id, label: provider.label } : null,
+    preview_files: Array.isArray(p.preview_files) ? p.preview_files : storedPreview(p.preview_files),
+    preview_source: p.preview_source || '',
+    preview_updated_at: p.preview_updated_at || null,
+    preview_truncated: Boolean(p.preview_truncated),
     delivery_type: p.delivery_type,
     delivery_label: ({ TEXT: '文本内容', LINK: '下载链接', FILE: '文件下载' })[p.delivery_type] || '数字交付',
     stock: p.stock,
@@ -412,10 +426,13 @@ function parseProduct(b) {
   const price = Number(b.price_points);
   const cover = String(b.cover_url ?? '').trim();
   const categoryId = String(b.category_id ?? '').trim();
-  const tags = parseTags(b.tags);
+  const rawTags = parseTags(b.tags);
   const type = String(b.delivery_type ?? 'TEXT').toUpperCase();
   const text = String(b.delivery_text ?? '');
   const link = String(b.delivery_url ?? '').trim();
+  const tags = providerTags(rawTags, type, link, MAX_PRODUCT_TAGS);
+  const preview = normalizePreview(type === 'LINK' ? b.preview_files : undefined);
+  const source = ['quark', 'baidu'].includes(b.preview_source) && detectNetdisk(link)?.id === b.preview_source ? b.preview_source : 'manual';
   const fileKey = String(b.file_key ?? '').trim();
   const fileName = String(b.file_name ?? '').trim();
   const status = String(b.status ?? 'ACTIVE').toUpperCase();
@@ -424,6 +441,7 @@ function parseProduct(b) {
   if (stock === '' || stock === null || stock === undefined) stock = null;
   else stock = Number(stock);
 
+  if (!preview.ok) return preview;
   if (title.length < 1 || title.length > 80) return { ok: false, error: '商品名称需为 1-80 个字符' };
   if (summary.length > 200) return { ok: false, error: '副标题最多 200 个字符' };
   if (description.length > 4000) return { ok: false, error: '商品详情最多 4000 个字符' };
@@ -443,6 +461,8 @@ function parseProduct(b) {
     value: {
       title, summary, description, price_points: price, cover_url: cover,
       category_id: categoryId || null, tags,
+      preview_files: preview.items, preview_source: preview.items.length ? source : '',
+      preview_truncated: preview.items.length && Boolean(b.preview_truncated) ? 1 : 0,
       delivery_type: type,
       delivery_text: type === 'TEXT' ? text : '',
       delivery_url: type === 'LINK' ? link : '',
@@ -453,10 +473,10 @@ function parseProduct(b) {
   };
 }
 
-async function listProducts(env, all = false, q = '', categoryId = '', tag = '') {
+async function listProducts(env, all = false, q = '', categoryId = '', tags = []) {
   q = String(q || '').trim().slice(0, 64);
   categoryId = String(categoryId || '').trim().slice(0, 64);
-  tag = String(tag || '').trim().slice(0, 24);
+  tags = Array.isArray(tags) ? tags : (tags ? [String(tags).trim().slice(0, 24)] : []);
   const where = [];
   const args = [];
   if (!all) where.push("status='ACTIVE'");
@@ -469,8 +489,11 @@ async function listProducts(env, all = false, q = '', categoryId = '', tag = '')
   }
   const sql = `SELECT * FROM products ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY sort_order DESC, created_at DESC LIMIT 200`;
   const rows = await env.DB.prepare(sql).bind(...args).all();
-  let items = (rows.results || []).map(p => ({ ...p, tags: parseTags(p.tags) }));
-  if (tag) items = items.filter(p => p.tags.includes(tag));
+  let items = (rows.results || []).map(p => ({ ...p,
+    tags: providerTags(parseTags(p.tags), p.delivery_type, p.delivery_url, MAX_PRODUCT_TAGS),
+    preview_files: storedPreview(p.preview_files),
+  }));
+  if (tags.length) items = items.filter(p => tags.every(tag => p.tags.includes(tag)));
   return { items: all ? items : items.map(publicProduct) };
 }
 
@@ -576,7 +599,7 @@ async function downloadOrderFile(request, env, key) {
   });
 }
 
-async function uploadFile(request, env) {
+async function uploadFile(request, env, source = 'goods') {
   if (!env.BUCKET) return fail(503, '尚未绑定 Cloudflare R2 存储桶。请在 wrangler.toml 增加 r2_buckets 绑定后重新部署。', 'STORAGE_NOT_CONFIGURED');
   const length = Number(request.headers.get('content-length') || 0);
   if (length > MAX_UPLOAD_BYTES + 1024 * 1024) return fail(413, '单个文件不能超过 50MB', 'FILE_TOO_LARGE');
@@ -587,13 +610,109 @@ async function uploadFile(request, env) {
   if (file.size > MAX_UPLOAD_BYTES) return fail(413, '单个文件不能超过 50MB', 'FILE_TOO_LARGE');
   if (file.size === 0) return fail(400, '文件内容为空', 'INVALID_ARGUMENT');
   const safeName = String(file.name || 'file').replace(/[^\w.\-\u4e00-\u9fa5]+/g, '_').slice(-80) || 'file';
-  const key = `goods/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${safeName}`;
+  const key = `${source}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${safeName}`;
   await env.BUCKET.put(key, await file.arrayBuffer(), {
     httpMetadata: { contentType: file.type || 'application/octet-stream' },
-    customMetadata: { originalName: encodeURIComponent(safeName) },
+    customMetadata: { originalName: encodeURIComponent(safeName), source },
   });
-  await audit(env, 'goods.file_uploaded', key, `${file.size} bytes`);
+  await audit(env, source === 'agent' ? 'agent.file_uploaded' : 'goods.file_uploaded', key, `${file.size} bytes`);
   return json({ ok: true, key, name: safeName, size: file.size, type: file.type || '' });
+}
+
+// Agent credentials have no admin or publishing privileges. The secret never
+// enters D1, URLs, public responses, or audit logs.
+async function requireAgent(request, env) {
+  const secret = String(env.AGENT_API_TOKEN || '');
+  if (secret.length < 32) throw Object.assign(new Error('Agent 接口未配置安全令牌'), { status: 503, code: 'AGENT_NOT_CONFIGURED' });
+  const match = (request.headers.get('authorization') || '').match(/^Bearer ([^\s]{1,512})$/i);
+  const candidate = match?.[1] || '';
+  if (!constantEq(await sha256(candidate), await sha256(secret))) {
+    throw Object.assign(new Error('Agent 令牌无效'), { status: 401, code: 'AGENT_UNAUTHORIZED' });
+  }
+}
+
+function agentProductView(product) {
+  return { id: product.id, title: product.title, status: product.status, price_points: product.price_points, created_at: product.created_at };
+}
+
+async function createAgentDraft(request, env) {
+  if (!env.BUCKET) return fail(503, '尚未绑定 R2 存储', 'STORAGE_NOT_CONFIGURED');
+  const body = await bodyJson(request);
+  const operation = String(body.idempotency_key || '').trim();
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(operation)) return fail(400, '幂等编号需为 8–128 位字母、数字、下划线或连字符', 'INVALID_ARGUMENT');
+  const key = String(body.file_key || '').trim();
+  if (!/^agent\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_-]{20,80}-[^/]{1,80}$/.test(key)) return fail(400, '只能关联 Agent 上传的文件', 'INVALID_FILE_KEY');
+  const parsed = parseProduct({
+    title: body.title, summary: body.summary, description: body.description,
+    price_points: body.price_points, category_id: body.category_id, tags: body.tags,
+    file_key: key, file_name: body.file_name, delivery_type: 'FILE', status: 'HIDDEN',
+    stock: body.stock, sort_order: 0,
+  });
+  if (!parsed.ok) return fail(400, parsed.error, 'INVALID_ARGUMENT');
+  const v = parsed.value;
+  const hash = await sha256(JSON.stringify(v));
+  async function existingResult() {
+    const job = await env.DB.prepare('SELECT * FROM agent_product_jobs WHERE idempotency_key=?').bind(operation).first();
+    if (!job) return null;
+    if (!constantEq(job.payload_hash, hash)) return fail(409, '该幂等编号已关联不同内容', 'IDEMPOTENCY_CONFLICT');
+    const product = await env.DB.prepare('SELECT id,title,status,price_points,created_at FROM products WHERE id=?').bind(job.product_id).first();
+    return product ? json({ ok: true, product: agentProductView(product), already_created: true })
+      : fail(410, '对应草稿已删除，请使用新的幂等编号', 'DRAFT_REMOVED');
+  }
+  const previous = await existingResult();
+  if (previous) return previous;
+  if (!await productCategoryOk(env, v.category_id)) return fail(400, '所选商品分类不存在', 'CATEGORY_NOT_FOUND');
+  const object = await env.BUCKET.head(key);
+  if (!object || object.customMetadata?.source !== 'agent') return fail(404, '未找到 Agent 上传的文件', 'FILE_NOT_FOUND');
+  const pid = id('prd_'); const created = now();
+  try {
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO agent_product_jobs(idempotency_key,payload_hash,product_id,created_at) VALUES(?,?,?,?)').bind(operation, hash, pid, created),
+      env.DB.prepare(`INSERT INTO products(id,title,summary,description,price_points,cover_url,category_id,tags,delivery_type,delivery_text,delivery_url,file_key,file_name,stock,status,sort_order,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(pid, v.title, v.summary, v.description, v.price_points, '', v.category_id, JSON.stringify(v.tags), 'FILE', '', '', v.file_key, v.file_name, v.stock, 'HIDDEN', 0, created, created),
+    ]);
+  } catch {
+    // Concurrent retries either see the same committed job or fail cleanly.
+    const existing = await existingResult();
+    if (existing) return existing;
+    return fail(503, '创建草稿失败，请使用相同幂等编号重试', 'DRAFT_CREATE_FAILED');
+  }
+  await audit(env, 'agent.draft_created', pid, 'Agent 上传文件创建待审核草稿');
+  return json({ ok: true, product: { id: pid, title: v.title, status: 'HIDDEN', price_points: v.price_points, created_at: created }, already_created: false }, 201);
+}
+
+async function generateCover(request, env) {
+  if (!env.AI?.run) return fail(503, '尚未配置 Workers AI 绑定', 'AI_NOT_CONFIGURED');
+  if (!env.BUCKET) return fail(503, '请先绑定 R2，以保存生成的封面', 'STORAGE_NOT_CONFIGURED');
+  const body = await bodyJson(request);
+  const prompt = String(body.prompt || '').trim();
+  if (prompt.length < 3 || prompt.length > 500) return fail(400, '封面描述需为 3–500 个字符', 'INVALID_ARGUMENT');
+  let image;
+  try {
+    const result = await env.AI.run('@cf/black-forest-labs/flux-1-schnell', { prompt, steps: 4 });
+    const encoded = result?.image;
+    if (typeof encoded !== 'string' || encoded.length > 8 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new Error('invalid image');
+    const binary = atob(encoded);
+    image = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) image[i] = binary.charCodeAt(i);
+    if (image.length < 4 || image[0] !== 0xff || image[1] !== 0xd8 || image[2] !== 0xff) throw new Error('invalid jpeg');
+  } catch {
+    return fail(503, '封面生成失败，请检查 Workers AI 配额、模型可用性或稍后重试', 'AI_GENERATION_FAILED');
+  }
+  const coverId = crypto.randomUUID();
+  await env.BUCKET.put(`covers/${coverId}.jpg`, image, { httpMetadata: { contentType: 'image/jpeg' } });
+  await audit(env, 'goods.cover_generated', coverId, 'Workers AI 手动生成封面');
+  return json({ ok: true, url: `/api/covers/${coverId}`, model: '@cf/black-forest-labs/flux-1-schnell' }, 201);
+}
+
+async function publicCover(env, coverId) {
+  if (!env.BUCKET) return fail(404, '图片不存在', 'NOT_FOUND');
+  const object = await env.BUCKET.get(`covers/${coverId}.jpg`);
+  if (!object) return fail(404, '图片不存在', 'NOT_FOUND');
+  return new Response(object.body, { headers: {
+    'content-type': 'image/jpeg', 'content-length': String(object.size),
+    'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff',
+  } });
 }
 
 async function verifyWebhook(request, env, raw) {
@@ -622,9 +741,21 @@ async function route(request, env, ctx) {
   if (path === '/api/product' && method === 'GET') return cachedPublicJson(request, async () => relayUpstream(env, '/product'), ctx);
   if (path === '/api/categories' && method === 'GET') return cachedPublicJson(request, async () => json(await publicCategories(env)), ctx);
 
+  // Only generated cover images are public; product files remain order-protected.
+  const coverMatch = path.match(/^\/api\/covers\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+  if (coverMatch && method === 'GET') return publicCover(env, coverMatch[1]);
+
+  // The external agent can upload and create hidden drafts, never publish.
+  if (path.startsWith('/api/agent/')) {
+    await requireAgent(request, env);
+    if (path === '/api/agent/uploads' && method === 'POST') return uploadFile(request, env, 'agent');
+    if (path === '/api/agent/drafts' && method === 'POST') return createAgentDraft(request, env);
+    return fail(404, 'Not Found', 'NOT_FOUND');
+  }
+
   // 商品货架（公开）
   if (path === '/api/products' && method === 'GET') return cachedPublicJson(request, async () => json(await listProducts(
-    env, false, url.searchParams.get('q'), url.searchParams.get('category'), url.searchParams.get('tag')
+    env, false, url.searchParams.get('q'), url.searchParams.get('category'), productTagFilters(url.searchParams)
   )), ctx);
   const buyMatch = path.match(/^\/api\/products\/([A-Za-z0-9_\-]{1,64})\/purchase$/);
   if (buyMatch && method === 'POST') {
@@ -788,6 +919,15 @@ async function route(request, env, ctx) {
       }
     }
 
+    if (path === '/api/admin/covers/generate' && method === 'POST') return generateCover(request, env);
+
+    // The request is authenticated as an admin, and only fixed platform hosts are contacted.
+    if (path === '/api/admin/netdisk/preview' && method === 'POST') {
+      const body = await bodyJson(request);
+      try { return json({ ok: true, ...await readShareDirectory(body.url, body.passcode) }); }
+      catch (error) { return fail(422, error.message, 'NETDISK_PREVIEW_UNAVAILABLE'); }
+    }
+
     // 商品管理
     if (path === '/api/admin/products' && method === 'GET') return json(await listProducts(env, true, url.searchParams.get('q')));
     if (path === '/api/admin/products' && method === 'POST') {
@@ -796,9 +936,9 @@ async function route(request, env, ctx) {
       const pid = id('prd_');
       const v = parsed.value;
       if (!await productCategoryOk(env, v.category_id)) return fail(400, '所选商品分类不存在', 'CATEGORY_NOT_FOUND');
-      await env.DB.prepare(`INSERT INTO products(id,title,summary,description,price_points,cover_url,category_id,tags,delivery_type,delivery_text,delivery_url,file_key,file_name,stock,status,sort_order,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .bind(pid, v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), now()).run();
+      await env.DB.prepare(`INSERT INTO products(id,title,summary,description,price_points,cover_url,category_id,tags,delivery_type,delivery_text,delivery_url,file_key,file_name,stock,status,sort_order,created_at,updated_at,preview_files,preview_source,preview_updated_at,preview_truncated)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(pid, v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), now(), JSON.stringify(v.preview_files), v.preview_source, v.preview_files.length ? now() : null, v.preview_truncated).run();
       await audit(env, 'goods.created', pid, `${v.title} / ${v.price_points} 积分`);
       await invalidatePublicCache(request, ['catalog']);
       const row = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(pid).first();
@@ -810,12 +950,23 @@ async function route(request, env, ctx) {
       const existing = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(pid).first();
       if (!existing) return fail(404, '商品不存在', 'PRODUCT_NOT_FOUND');
       if (method === 'PUT') {
-        const parsed = parseProduct(await bodyJson(request));
+        const body = await bodyJson(request);
+        // Older clients may omit the preview. Preserve it only while the delivery
+        // link is unchanged, so an old snapshot cannot silently describe a new share.
+        if (!Object.hasOwn(body, 'preview_files') && String(body.delivery_url || '').trim() === existing.delivery_url) {
+          body.preview_files = storedPreview(existing.preview_files);
+          body.preview_source = existing.preview_source;
+          body.preview_truncated = existing.preview_truncated;
+        }
+        const parsed = parseProduct(body);
         if (!parsed.ok) return fail(400, parsed.error, 'INVALID_ARGUMENT');
         const v = parsed.value;
         if (!await productCategoryOk(env, v.category_id)) return fail(400, '所选商品分类不存在', 'CATEGORY_NOT_FOUND');
-        await env.DB.prepare(`UPDATE products SET title=?,summary=?,description=?,price_points=?,cover_url=?,category_id=?,tags=?,delivery_type=?,delivery_text=?,delivery_url=?,file_key=?,file_name=?,stock=?,status=?,sort_order=?,updated_at=? WHERE id=?`)
-          .bind(v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), pid).run();
+        const samePreview = JSON.stringify(v.preview_files) === JSON.stringify(storedPreview(existing.preview_files)) &&
+          v.preview_source === existing.preview_source && v.preview_truncated === Number(existing.preview_truncated || 0) && v.delivery_url === existing.delivery_url;
+        const previewTime = v.preview_files.length ? (samePreview ? existing.preview_updated_at : now()) : null;
+        await env.DB.prepare(`UPDATE products SET title=?,summary=?,description=?,price_points=?,cover_url=?,category_id=?,tags=?,delivery_type=?,delivery_text=?,delivery_url=?,file_key=?,file_name=?,stock=?,status=?,sort_order=?,updated_at=?,preview_files=?,preview_source=?,preview_updated_at=?,preview_truncated=? WHERE id=?`)
+          .bind(v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), JSON.stringify(v.preview_files), v.preview_source, previewTime, v.preview_truncated, pid).run();
         await audit(env, 'goods.updated', pid, `${v.title} / ${v.status}`);
         await invalidatePublicCache(request, ['catalog']);
         const row = await env.DB.prepare('SELECT * FROM products WHERE id=?').bind(pid).first();

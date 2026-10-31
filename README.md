@@ -11,7 +11,7 @@
 ### 前台
 
 - **首页（`/`）**：品牌入口与分类导航，不再直接堆叠商品货架。
-- **商品页（`/shop`）**：独立商品目录，支持按一级分类、二级子分类、标签、关键词筛选与积分排序；父分类自动包含其子分类商品。
+- **商品页（`/shop`）**：独立商品目录，支持按一级分类、二级子分类、多选标签、关键词筛选与积分排序；多个标签需同时满足；父分类自动包含其子分类商品。
 - **个人中心（`/account`）**：注册 / 登录、积分余额、充值套餐、我的已购与账户信息。充值入口只放在个人中心。
 - **积分充值**：只读加载一人付当前 `/product` 可售积分套餐，点击后拿 `purchase_url` 跳转支付宝；入口状态不等于支付成功。
 - **积分兑换**：先使用店铺赠送积分；不足部分再用 `/consume` 幂等核销支付宝积分。涉及一人付时，**只有 `status=SUCCEEDED && confirmed=true` 才交付内容**；纯赠送积分订单无需请求一人付。
@@ -21,7 +21,7 @@
 ### 后台（`/admin`）
 
 - **独立管理员登录**：使用已授予 `admin` 角色的普通账号邮箱和密码登录；后台使用独立 Cookie 与会话，不影响前台用户登录，退出后台也不会退出商店账号。旧的全局管理员密码入口已移除。
-- **商品管理**：上架 / 编辑 / 下架 / 删除商品。字段包含名称、副标题、详情、积分价、封面、所属分类、标签、库存（留空为不限）、排序、状态。
+- **商品管理**：上架 / 编辑 / 下架 / 删除商品。字段包含名称、副标题、详情、积分价、封面、所属分类、标签、库存（留空为不限）、排序、状态。识别夸克 / 百度分享后自动加入平台标签，可尝试读取公开目录或手工填写；目录需要管理员检查并保存后才会公开。
 - **分类管理**：管理一级分类与二级子分类，支持排序、启用 / 隐藏；分类下有子分类或商品时禁止删除。
 - **交付方式三选一**：
   - `文本`：兑换后直接显示文本内容，可复制（适合卡密、提取码、账号信息）。
@@ -45,7 +45,7 @@
 
 ### 升级已有数据库
 
-**新代码依赖 `0006_bonus_points.sql`；上线前必须先迁移**，否则余额、用户列表及兑换接口会报错。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换并确保旧 Worker 已停止处理订单，然后应用迁移、部署新版本再恢复流量。未确认的旧订单保留原业务编号查询，不要重建或手工退款。
+**新代码依赖 `0006_bonus_points.sql` 和 `0007_catalog_agent.sql`；上线前必须先迁移**，否则赠送积分、商品保存或 Agent 草稿等接口可能报错。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换并确保旧 Worker 已停止处理订单，然后应用迁移、部署新版本再恢复流量。未确认的旧订单保留原业务编号查询，不要重建或手工退款。
 
 ```bash
 # 仅在获得正式上线授权后操作远程数据库
@@ -70,7 +70,7 @@ npx wrangler login
 npx wrangler d1 create onepay-shop
 ```
 
-4. 应用全部数据库迁移（包含商品、订单、账号角色与赠送积分）：
+4. 应用全部数据库迁移（包含商品、订单、账号角色、赠送积分、目录快照和 Agent 幂等记录）：
 
 ```bash
 npx wrangler d1 migrations apply onepay-shop --remote
@@ -98,7 +98,7 @@ npx wrangler secret put YIRENFU_WEBHOOK_SECRET
 npx wrangler r2 bucket create onepay-shop-files
 ```
 
-然后在 `wrangler.toml` 中取消这三行注释并重新部署：
+确认 `wrangler.toml` 中的 R2 桶名称与实际桶一致（示例如下）：
 
 ```toml
 [[r2_buckets]]
@@ -109,6 +109,8 @@ bucket_name = "onepay-shop-files"
 未绑定时后台「上传文件」会明确提示未配置，此时用「链接」方式交付网盘地址即可。
 
 7. 部署 / 预览：
+
+本地默认使用 `wrangler.dev.toml`（本地 D1 / R2，不绑定远程 AI），无需 Cloudflare 登录即可预览；封面生成会提示未配置。需要真实测试 AI 时，使用正式配置启动 `npx wrangler dev --config wrangler.toml --ip 0.0.0.0`，需先登录 Cloudflare，调用真实远程 Workers AI 并可能产生费用。两份配置中的 D1 ID / 桶名若更改，请保持同步。
 
 ```bash
 npm run dev
@@ -136,7 +138,7 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 2. 进入「商品管理」→「+ 上架新商品」。
 3. 填名称、积分价，选择交付方式：
    - 文本：把卡密 / 提取码 / 使用说明粘进「交付文本」。
-   - 链接：粘贴网盘分享链接（如 `https://pan.baidu.com/s/...`）。
+   - 链接：粘贴网盘分享链接（如 `https://pan.baidu.com/s/1…`）；夸克 / 百度会自动识别并尝试读取。可用提取码读取，失败可手工填写目录，检查无私密信息后保存。提取码输入框只用于读取；买家需要时，可在私密交付链接中附带 `?pwd=提取码`。
    - 文件：点「上传文件」传到 R2，再填下载显示名。
 4. 库存留空表示不限；状态选「上架」后保存。
 5. 回到前台 `/` 即可看到商品，登录用户用积分兑换。
@@ -148,7 +150,9 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 | `YIRENFU_API_KEY` | Worker Secret | 一人付 API 请求，只在服务端发出 |
 | `YIRENFU_WEBHOOK_SECRET` | Worker Secret | 校验一人付通知签名 |
 | `DB` | D1 绑定 | 账号、会话、商品、订单、核销与去重记录 |
-| `BUCKET` | R2 绑定 | 商品文件存储 |
+| `BUCKET` | R2 绑定 | 私有商品文件及公开封面存储 |
+| `AI` | Workers AI 绑定 | 管理员手动生成封面；已在 Wrangler 配置 |
+| `AGENT_API_TOKEN` | 可选 Worker Secret | 外部 Agent 上传文件和创建隐藏草稿，未配置时接口关闭 |
 | `ASSETS` | 静态资源 | `public/` 下的前台与后台页面 |
 | `COOKIE_NAME` | 环境变量 | 前台用户会话 Cookie |
 | `ADMIN_COOKIE_NAME` | 环境变量 | 后台管理员独立会话 Cookie |
@@ -159,7 +163,7 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/products` | 已上架商品（不含交付内容）；支持 `q`、`category`、`tag` 筛选 |
+| GET | `/api/products` | 已上架商品（不含交付内容）；支持 `q`、`category`、重复 `tag` 参数筛选（最多 8 个，AND 关系） |
 | GET | `/api/categories` | 前台可见的一级分类与子分类，含商品数 |
 | POST | `/api/products/:id/purchase` | 用积分兑换，body `{ idempotency_key }` |
 | GET | `/api/orders` | 我的订单与已交付内容 |
@@ -174,10 +178,52 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 | GET/POST/PUT/DELETE | `/api/admin/products[/:id]` | 商品管理（含分类与标签） |
 | GET/POST/PUT/DELETE | `/api/admin/categories[/:id]` | 一级分类 / 二级子分类管理 |
 | POST | `/api/admin/upload` | 上传交付文件到 R2（multipart） |
+| POST | `/api/admin/netdisk/preview` | 管理员尝试读取公开分享目录，body `{ url, passcode? }`；仅返回文件名快照 |
+| POST | `/api/admin/covers/generate` | 管理员手动生成封面，body `{ prompt }` |
+| GET | `/api/covers/:id` | 公开查看生成的封面，不提供商品文件访问 |
+| POST | `/api/agent/uploads` | Bearer 令牌上传 Agent 文件（multipart） |
+| POST | `/api/agent/drafts` | Bearer 令牌关联已上传文件并创建隐藏草稿（幂等） |
 | GET | `/api/admin/orders` | 成交订单列表 |
 | POST | `/api/admin/users/:id/role` | 设置管理员角色，body `{ role: "admin" \| "user" }` |
 | GET | `/api/admin/users/:id/bonus` | 店铺赠送积分余额与最近流水 |
 | POST | `/api/admin/users/:id/bonus` | 调整赠送积分，body `{ delta, reason, idempotency_key }`；操作编号可安全重试 |
+
+## 目录快照、图标与 AI 封面
+
+- 后台粘贴 `https://pan.quark.cn/s/...` 或 `https://pan.baidu.com/s/1...` 后自动识别并尝试读取（离开输入框后触发），可输入提取码再点「读取网盘目录」。其他链接和读取失败时可以手动填写。平台的公开分享接口是**非官方适配**，可能因平台变更、登录、风控或权限要求而失败，不能保证每个分享都可读；不使用网盘账号 Cookie。
+- 读取只抓取根目录和一层子目录，最多 150 项、6 次列表请求；超出、无法继续读取或存在更深文件夹会标记为「部分目录」。这不是实时列表。管理员检查并保存后，消费者可在商品卡片点「查看资源目录」，其名称及更新时间会公开。**不要把链接、提取码、个人资料或其他敏感信息写进目录名称**；管理员有责任审核内容。交付 URL、读取用提取码、平台 token 和文件 ID 不会放在公共商品 API 中。
+- 分享提取码输入框仅用于本次读取，不会保存或单独随订单交付。如买家需要提取码，可以在私密交付链接中附带 `?pwd=提取码`；兑换成功后该完整 URL 会显示给买家。链接变化后旧目录会清空，需要重新读取或填写。平台标签占 8 个标签中的一个位置。
+- 商店 Logo 位于 `public/assets/brand-logo.svg`。网盘来源标识仅用于识别平台：夸克标识来自 [应用宝的夸克网盘页面](https://sj.qq.com/appdetail/com.tencent.pcgame.quakuakewangpanpdfbeifenbofangqi)，百度标识来自 [应用宝的百度网盘页面](https://sj.qq.com/appdetail/com.baidu.netdisk)；商标权利归各自权利人所有。
+- 后台商品表单展开「AI 生成商品封面」，填写描述、确认费用提示后才会调用 `@cf/black-forest-labs/flux-1-schnell`，预览满意后点击「使用这张封面」并保存商品。需要 `AI` 与 `BUCKET` 绑定。生成的封面以不可预测的 URL 公开读取，**不要输入敏感信息**；未选用的封面也保留在 R2，需自行清理。
+- [Workers AI 价格](https://developers.cloudflare.com/workers-ai/platform/pricing/)：截至 2026-10，账户每天有 10,000 **Neurons** 共享免费额度（不是 10,000 张图片，UTC 零点重置）；Free 计划超额请求失败，付费计划超额可能收费。额度会与账户其他 AI 应用共享，手动确认不保证零费用，请自行监控与设置账户限额。
+
+## 外部 Agent 文件接口
+
+Agent 只允许上传文件（单个不超过 50 MB）并创建**下架草稿**；它不能登录后台、发布商品、修改订单或读取用户资料。管理员仍需检查内容、价格、版权与分类，再手动上架。上传文件存入 R2 私有 `agent/` 前缀，下载仍需本人有效订单；Agent 文件 key 仅在认证后的上传结果与后台可见。
+
+正式启用前，需要启用 R2、先应用迁移，再通过 Wrangler Secret 配置独立的高随机度 `AGENT_API_TOKEN`（至少 32 字符，建议 32 字节随机值），不要复用任何其他凭证。下面是**未来获得上线授权后的配置示例**，不会自动部署：
+
+```bash
+# 生成随机令牌后通过安全通道设置，切勿把令牌写入 Git 或发到聊天中
+openssl rand -hex 32
+npx wrangler secret put AGENT_API_TOKEN
+```
+
+之后 Agent 通过 HTTPS 使用 `Authorization: Bearer …` 请求，以下命令假定令牌已安全放入当前进程的 `AGENT_API_TOKEN` 环境变量（不要放在 URL 中）：
+
+```bash
+# 第一步：上传已由外部 Agent 生成的文件；响应含 key、name、size
+curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/uploads \
+  -H "Authorization: Bearer $AGENT_API_TOKEN" \
+  -F 'file=@./generated.zip'
+
+# 第二步：用上一步的 key 创建草稿，idempotency_key 应由 Agent 唯一生成并在重试时复用
+curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
+  -H "Authorization: Bearer $AGENT_API_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"idempotency_key":"agent-job-unique-001","title":"生成的资料包","price_points":20,"file_key":"上传响应中的key","file_name":"generated.zip","tags":["资料"]}'
+```
+
+相同编号和内容重试返回原草稿；同一编号用于不同内容返回 409；草稿删除后原编号不能重新创建。Agent 即使提交 `status: ACTIVE` 也只会得到隐藏草稿。上传请求本身不去重，失败重试可能留下未关联文件，应定期清理 R2 中无引用的 `agent/` 对象。令牌泄露时立即轮换 Worker Secret，并建议在 Cloudflare 配置 API 速率限制；本接口没有内置全局速率限制。
 
 ## 缓存策略
 

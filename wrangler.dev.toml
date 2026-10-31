@@ -1,0 +1,28 @@
+# Offline-friendly local preview. AI is intentionally omitted: Workers AI is a
+# remote binding in wrangler dev and requires Cloudflare login and quota.
+name = "onepay-shop-local"
+main = "src/index.js"
+compatibility_date = "2026-05-03"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "onepay-shop"
+database_id = "930bf844-3ea5-4817-9875-bc727846a973"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "onepay-shop-files"
+
+[vars]
+SITE_NAME = "云端积分商店"
+SITE_DESCRIPTION = "支付宝安全充值积分 · 积分兑换数字商品"
+COOKIE_NAME = "onepay_session"
+ADMIN_COOKIE_NAME = "onepay_admin_session"
+SESSION_DAYS = "14"

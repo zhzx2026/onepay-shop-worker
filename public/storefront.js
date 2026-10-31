@@ -110,7 +110,8 @@
       const ids = new Set(categoryIds(state.category, categories));
       list = list.filter(item => ids.has(item.category_id));
     }
-    if (state.tag) list = list.filter(item => (item.tags || []).includes(state.tag));
+    const tags = Array.isArray(state.tags) ? state.tags : (state.tag ? [state.tag] : []);
+    if (tags.length) list = list.filter(item => tags.every(tag => (item.tags || []).includes(tag)));
     if (state.q) {
       const q = state.q.toLowerCase();
       list = list.filter(item => [item.title, item.summary, ...(item.tags || [])].join(' ').toLowerCase().includes(q));
@@ -127,7 +128,10 @@
     const fallback = `/assets/product-${art + 1}.svg`;
     const source = product.cover_url || fallback;
     const fallbackAttr = product.cover_url ? ` data-cover-fallback="${fallback}"` : '';
-    return `<div class="product-cover"><img src="${esc(source)}"${fallbackAttr} alt="" loading="lazy"><span class="cover-badge">${esc(product.delivery_label || '数字交付')}</span></div>`;
+    const provider = product.provider?.id === 'quark' ? { icon: '/assets/netdisk-quark.png', label: '夸克网盘' }
+      : product.provider?.id === 'baidu' ? { icon: '/assets/netdisk-baidu.png', label: '百度网盘' } : null;
+    const badge = provider ? `<img src="${provider.icon}" alt="">${provider.label}` : esc(product.delivery_label || '数字交付');
+    return `<div class="product-cover"><img src="${esc(source)}"${fallbackAttr} alt="" loading="lazy"><span class="cover-badge">${badge}</span></div>`;
   }
 
   document.addEventListener('error', event => {
