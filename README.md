@@ -132,6 +132,22 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 
 之后可在后台「用户管理」直接设置或取消管理员角色，不需要再操作数据库。`0004` 迁移会把迁移前已存在的 `zj` 开头账号提升为管理员；此后新注册的账号不会仅凭邮箱前缀自动获得后台权限，避免公开注册导致提权。
 
+### 恢复误停用的管理员
+
+如果没有其他管理员可以在后台启用该账号，请先备份 D1，并确认 Wrangler 当前登录的 Cloudflare 账号和仓库 `wrangler.toml` 中的数据库均正确。以下 `--remote` 命令直接操作远程数据库，不会部署 Worker。先查看管理员账号并记下需恢复的完整 ID：
+
+```bash
+npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "SELECT id,email,role,disabled FROM users WHERE role='admin';"
+```
+
+将下面的 `替换为完整管理员ID` 换成刚刚确认的 ID 后执行。命令只启用仍具有 `admin` 角色且已停用的指定账号，不修改密码或授予权限：
+
+```bash
+npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "UPDATE users SET disabled=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id='替换为完整管理员ID' AND role='admin' AND disabled=1;"
+```
+
+再次执行查询，确认该账号的 `disabled` 为 `0`。停用时原会话已被撤销，恢复后请用原邮箱和密码重新登录 `/admin`。若找不到账号或角色不是 `admin`，不要盲目执行提权，应先确认账号和数据库。
+
 ## 上架第一件商品
 
 1. 打开 `/admin`，使用管理员账号登录。
@@ -190,8 +206,9 @@ npx wrangler d1 execute onepay-shop --remote --command "UPDATE users SET role='a
 
 ## 目录快照、图标与 AI 封面
 
-- 后台粘贴 `https://pan.quark.cn/s/...` 或 `https://pan.baidu.com/s/1...` 后自动识别并尝试读取（离开输入框后触发），可输入提取码再点「读取网盘目录」。其他链接和读取失败时可以手动填写。平台的公开分享接口是**非官方适配**，可能因平台变更、登录、风控或权限要求而失败，不能保证每个分享都可读；不使用网盘账号 Cookie。
-- 读取只抓取根目录和一层子目录，最多 150 项、6 次列表请求；超出、无法继续读取或存在更深文件夹会标记为「部分目录」。这不是实时列表。管理员检查并保存后，消费者可在商品卡片点「查看资源目录」，其名称及更新时间会公开。**不要把链接、提取码、个人资料或其他敏感信息写进目录名称**；管理员有责任审核内容。交付 URL、读取用提取码、平台 token 和文件 ID 不会放在公共商品 API 中。
+- 后台粘贴 `https://pan.quark.cn/s/...`（或 `https://drive.quark.cn/s/...`）或 `https://pan.baidu.com/s/1...` 后自动识别并尝试读取（离开输入框后触发），可输入提取码再点「读取网盘目录」。其他链接和读取失败时可以手动填写。夸克先尝试按 Skill 1.0.20 调查所得的客态首页和翻页路径，失败时兼容原来的游客接口；不使用网盘账号 Cookie。百度提取码验证得到的分享 Cookie 仅在该次请求内使用。此适配**尚未完成真实夸克联调**，平台可能因变更、登录、风控或权限要求而拒绝访问，不能保证每个分享都可读。接口与验证边界见 [夸克分享目录调查](docs/quark-share-protocol.md)。
+- 读取根目录和一层子目录；夸克若以单个文件夹包装分享，会额外展开这层包装。最多 150 项、6 次列表请求（包括夸克首页和备用主机重试）；超出、无法继续读取或存在更深文件夹会标记为「部分目录」。夸克目录使用 50 项分页并尽可能读取对应目录总数。失败时后台会显示步骤、HTTP 状态和数字平台码等诊断信息，不显示上游消息或凭据；排查时不要分享链接、提取码、Cookie 或 token。
+- 这不是实时列表。管理员检查并保存后，消费者可在商品卡片点「查看资源目录」，其名称及更新时间会公开。**不要把链接、提取码、个人资料或其他敏感信息写进目录名称**；管理员有责任审核内容。交付 URL、读取用提取码、平台 token 和文件 ID 不会放在公共商品 API 中。
 - 分享提取码输入框仅用于本次读取，不会保存或单独随订单交付。如买家需要提取码，可以在私密交付链接中附带 `?pwd=提取码`；兑换成功后该完整 URL 会显示给买家。链接变化后旧目录会清空，需要重新读取或填写。平台标签占 8 个标签中的一个位置。
 - 商店 Logo 位于 `public/assets/brand-logo.svg`。网盘来源标识仅用于识别平台：夸克标识来自 [应用宝的夸克网盘页面](https://sj.qq.com/appdetail/com.tencent.pcgame.quakuakewangpanpdfbeifenbofangqi)，百度标识来自 [应用宝的百度网盘页面](https://sj.qq.com/appdetail/com.baidu.netdisk)；商标权利归各自权利人所有。
 - 后台商品表单展开「AI 生成商品封面」，填写描述、确认费用提示后才会调用 `@cf/black-forest-labs/flux-1-schnell`，预览满意后点击「使用这张封面」并保存商品。需要 `AI` 与 `BUCKET` 绑定。生成的封面以不可预测的 URL 公开读取，**不要输入敏感信息**；未选用的封面也保留在 R2，需自行清理。
@@ -245,7 +262,7 @@ curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
 
 ## 安全行为
 
-- 前台用户与后台管理员使用不同 Cookie；后台每次请求都会重新校验账号角色与停用状态，降权、停用后旧后台会话立即失效。
+- 前台用户与后台管理员使用不同 Cookie；后台每次请求都会重新校验账号角色与停用状态，降权、停用后旧后台会话立即失效。管理员不能停用当前登录的账号，但仍可停用或启用其他账号。
 - 管理员角色只能由现有管理员在后台授予；新注册账号固定为普通用户，不按邮箱前缀自动提权。
 - 前端价格仅用于展示；购买积分只传有效 `sku_id`，不传价格或 plan ID。
 - 兑换商品时扣减数量由服务端按商品当前积分价决定，前端传价格无效。

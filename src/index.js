@@ -120,7 +120,7 @@ async function webhookSecretValue(env) { return (await getSetting(env, 'yirenfu_
 async function audit(env, action, target = '', detail = '') {
   try { await env.DB.prepare('INSERT INTO admin_audit(id,action,target,detail,created_at) VALUES(?,?,?,?,?)').bind(id('aud_'), action, target, detail, now()).run(); } catch {}
 }
-async function listUsers(env, url) {
+async function listUsers(env, url, currentAdminId) {
   const q = String(url.searchParams.get('q') || '').trim().slice(0, 64);
   const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 20) || 20));
   const offset = Math.max(0, Math.min(100000, Number(url.searchParams.get('offset') || 0) || 0));
@@ -135,7 +135,7 @@ async function listUsers(env, url) {
        COALESCE((SELECT balance FROM bonus_wallets w WHERE w.user_id=u.id),0) AS bonus_points
      FROM users u ${filter} ORDER BY u.created_at DESC LIMIT ? OFFSET ?`
   ).bind(Math.floor(Date.now() / 1000), ...args, limit, offset).all();
-  return { total: totalRow?.c || 0, limit, offset, items: rows.results || [] };
+  return { total: totalRow?.c || 0, limit, offset, current_user_id: currentAdminId, items: rows.results || [] };
 }
 async function yirenfu(env, path, method = 'GET', payload) {
   const key = await apiKeyValue(env);
@@ -925,7 +925,9 @@ async function route(request, env, ctx) {
     if (path === '/api/admin/netdisk/preview' && method === 'POST') {
       const body = await bodyJson(request);
       try { return json({ ok: true, ...await readShareDirectory(body.url, body.passcode) }); }
-      catch (error) { return fail(422, error.message, 'NETDISK_PREVIEW_UNAVAILABLE'); }
+      catch (error) {
+        return json({ error: error.message, error_code: 'NETDISK_PREVIEW_UNAVAILABLE', ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}) }, 422);
+      }
     }
 
     // 商品管理
@@ -1053,7 +1055,7 @@ async function route(request, env, ctx) {
       await audit(env, 'admin.webhook_secret_updated');
       return json({ ok: true, ...await secretState(env) });
     }
-    if (path === '/api/admin/users' && method === 'GET') return json(await listUsers(env, url));
+    if (path === '/api/admin/users' && method === 'GET') return json(await listUsers(env, url, admin.id));
     if (path === '/api/admin/audit' && method === 'GET') {
       const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 30) || 30));
       const rows = await env.DB.prepare('SELECT id,action,target,detail,created_at FROM admin_audit ORDER BY created_at DESC LIMIT ?').bind(limit).all();
@@ -1097,6 +1099,7 @@ async function route(request, env, ctx) {
       }
       if (action === 'status' && method === 'POST') {
         const b = await bodyJson(request); const disabled = b.disabled === true;
+        if (disabled && targetId === admin.id) return fail(400, '不能停用当前登录的管理员账号', 'SELF_DISABLE_FORBIDDEN');
         await env.DB.prepare('UPDATE users SET disabled=?,updated_at=? WHERE id=?').bind(disabled ? 1 : 0, now(), targetId).run();
         if (disabled) await env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId).run();
         await audit(env, disabled ? 'user.disabled' : 'user.enabled', targetId, target.email);
