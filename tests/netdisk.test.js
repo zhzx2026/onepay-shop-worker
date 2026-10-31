@@ -20,6 +20,9 @@ test('directory snapshots accept only bounded, non-secret names', () => {
   assert.equal(normalizePreview('drive.quark.cn/s/SECRET').ok, false);
   assert.equal(normalizePreview('提取码 abcd').ok, false);
   assert.equal(normalizePreview('https://example.com/private').ok, false);
+  for (const value of ['ftp://example.com/file', 'magnet:?xt=urn:btih:secret', 'ed2k://private', 'stoken=secret', 'access_token: secret', 'passcode=1234']) {
+    assert.equal(normalizePreview(value).ok, false, value);
+  }
   assert.equal(normalizePreview(Array.from({ length: 151 }, (_, i) => '文件' + i)).ok, false);
 });
 
@@ -94,7 +97,7 @@ test('adapters fail closed on errors and mark depth, page and response limits', 
   });
   assert.equal(result.items.length, 50); // repeated pages cannot inflate the snapshot
   assert.equal(result.truncated, true);
-  assert.ok(calls <= 7); // token + 6 bounded list calls
+  assert.ok(calls <= 13); // token + at most 12 bounded list attempts
 });
 
 test('Quark pagination follows the real metadata envelope before visiting child folders', async () => {
@@ -126,7 +129,7 @@ test('Quark pagination follows the real metadata envelope before visiting child 
   assert.equal(result.truncated, false);
 });
 
-test('Quark honors a smaller reported page size and the depth limit', async () => {
+test('Quark honors a smaller reported page size and reads nested files', async () => {
   const pages = [];
   const result = await readShareDirectory('https://pan.quark.cn/s/abc', '', async url => {
     const parsed = new URL(url);
@@ -138,13 +141,13 @@ test('Quark honors a smaller reported page size and the depth limit', async () =
     const parent = parsed.searchParams.get('pdir_fid'), page = Number(parsed.searchParams.get('_page'));
     pages.push(`${parent}:${page}`);
     const list = parent === '0' ? [{ file_name: '最后一项', fid: 'f20', dir: false }]
-      : [{ file_name: '更深的文件夹', fid: 'deep', dir: '1' }];
+      : parent === 'folder' ? [{ file_name: '更深的文件夹', fid: 'deep', dir: '1' }] : [{ file_name: '深层文件.pdf', fid: 'inner', dir: '0' }];
     return response({ code: 0, data: { list }, metadata: { _total: parent === '0' ? 21 : 1, _size: 20 } });
   });
-  assert.deepEqual(pages, ['0:1', '0:2', 'folder:1']);
+  assert.deepEqual(pages, ['0:1', '0:2', 'folder:1', 'deep:1']);
   assert.ok(result.items.includes('最后一项'));
-  assert.ok(result.items.includes('项目0/更深的文件夹/'));
-  assert.equal(result.truncated, true);
+  assert.ok(result.items.includes('项目0/更深的文件夹/深层文件.pdf'));
+  assert.equal(result.truncated, false);
 });
 
 test('Quark Skill guest flow falls back to the fixed alternate host without cookies', async () => {
@@ -225,11 +228,11 @@ test('partial directory failures report a sanitized warning without exceeding th
   assert.equal(result.warning.diagnostic.stage, 'DETAIL');
   assert.equal(result.warning.diagnostic.provider_code, 31001);
   assert.match(result.warning.message, /HTTP 403/);
-  assert.ok(calls.filter(url => url.pathname.endsWith('/detail')).length <= 6);
+  assert.ok(calls.filter(url => url.pathname.endsWith('/detail')).length <= 12);
   for (const secret of ['temporary-secret', 'privateId', 'private-folder']) assert.ok(!JSON.stringify(result).includes(secret));
 });
 
-test('fallback attempts count toward the six-request directory budget', async () => {
+test('fallback attempts count toward the twelve-request directory budget', async () => {
   const detailCalls = [];
   const result = await readShareDirectory('https://pan.quark.cn/s/a', '', async url => {
     const parsed = new URL(url);
@@ -238,7 +241,7 @@ test('fallback attempts count toward the six-request directory budget', async ()
     if (parsed.searchParams.get('_page') === '2' && parsed.hostname === 'drive-h.quark.cn') throw new Error('temporary network failure');
     return response({ code: 0, data: { list: Array.from({ length: 50 }, (_, i) => ({ file_name: `项目${i}`, fid: `f${i}`, dir: false })) }, metadata: { _total: 1000, _size: 50 } });
   });
-  assert.equal(detailCalls.length, 6);
+  assert.equal(detailCalls.length, 12);
   assert.equal(result.truncated, true);
   assert.equal(result.items.length, 50);
 });

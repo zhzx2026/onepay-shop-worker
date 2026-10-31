@@ -36,13 +36,32 @@ export async function adjustBonus(env, { userId, actorId, delta, reason, key }) 
   return { ok: true, balance: Number(entry.balance_after), delta: Number(entry.delta) };
 }
 
-export async function reserveOrder(env, { productId, userId, key, orderNo }) {
+export async function reserveOrder(env, { productId, userId, key, orderNo, expectedPrice = null, expectedKind = null, expectedDays = null, expectedSubscriptionRevision = null }) {
   const at = timestamp();
   const result = await env.DB.batch([
-    env.DB.prepare("UPDATE products SET stock=stock-1,sold_count=sold_count+1,updated_at=? WHERE id=? AND status='ACTIVE' AND (stock IS NULL OR stock>0) AND EXISTS (SELECT 1 FROM users WHERE id=? AND COALESCE(disabled,0)=0) AND NOT EXISTS (SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status='PENDING')").bind(at, productId, userId, userId, productId),
-    env.DB.prepare(`INSERT INTO orders(idempotency_key,order_no,user_id,product_id,title,price_points,delivery_type,delivery_text,delivery_url,file_key,file_name,status,created_at,bonus_points_used)
+    // The ownership, pending-order and displayed-term checks must happen in the
+    // same transaction as stock reservation. Two new operation keys cannot race
+    // past one another to purchase a non-repeatable product.
+    env.DB.prepare(`UPDATE products SET stock=stock-1,sold_count=sold_count+1,updated_at=?
+      WHERE id=? AND status='ACTIVE' AND (stock IS NULL OR stock>0)
+      AND EXISTS (SELECT 1 FROM users WHERE id=? AND COALESCE(disabled,0)=0)
+      AND NOT EXISTS (SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status='PENDING')
+      AND ((product_kind='SINGLE' AND (allow_repeat=1 OR NOT EXISTS
+          (SELECT 1 FROM orders WHERE user_id=? AND product_id=? AND status='DELIVERED')))
+        OR (product_kind='SUBSCRIPTION' AND NOT EXISTS
+          (SELECT 1 FROM subscriptions WHERE user_id=? AND product_id=? AND permanent=1)))
+      AND (? IS NULL OR price_points=?) AND (? IS NULL OR product_kind=?)
+      AND (? IS NULL OR subscription_days=?)
+      AND (? IS NULL OR product_kind<>'SUBSCRIPTION'
+        OR (?='none' AND NOT EXISTS (SELECT 1 FROM subscriptions WHERE user_id=? AND product_id=?))
+        OR EXISTS (SELECT 1 FROM subscriptions WHERE user_id=? AND product_id=?
+          AND ?=CASE WHEN permanent=1 THEN 'permanent' ELSE 'until:'||expires_at END))`)
+      .bind(at, productId, userId, userId, productId, userId, productId, userId, productId,
+        expectedPrice, expectedPrice, expectedKind, expectedKind, expectedDays, expectedDays,
+        expectedSubscriptionRevision, expectedSubscriptionRevision, userId, productId, userId, productId, expectedSubscriptionRevision),
+    env.DB.prepare(`INSERT INTO orders(idempotency_key,order_no,user_id,product_id,title,price_points,delivery_type,delivery_text,delivery_url,file_key,file_name,status,created_at,bonus_points_used,product_kind,subscription_days)
       SELECT ?,?,?,p.id,p.title,p.price_points,p.delivery_type,p.delivery_text,p.delivery_url,p.file_key,p.file_name,'PENDING',?,
-        MIN(p.price_points,COALESCE((SELECT balance FROM bonus_wallets WHERE user_id=?),0))
+        MIN(p.price_points,COALESCE((SELECT balance FROM bonus_wallets WHERE user_id=?),0)),p.product_kind,p.subscription_days
       FROM products p WHERE p.id=? AND changes()=1`).bind(key, orderNo, userId, at, userId, productId),
     env.DB.prepare(`UPDATE bonus_wallets SET balance=balance-(SELECT bonus_points_used FROM orders WHERE idempotency_key=?),updated_at=?
       WHERE user_id=? AND changes()=1 AND (SELECT bonus_points_used FROM orders WHERE idempotency_key=?)>0`).bind(key, at, userId, key),

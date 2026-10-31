@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261031-4">
+<link rel="stylesheet" href="/admin.css?v=20261031-5">
 </head>
 <body>
 
@@ -44,6 +44,7 @@
       <button onclick="tab('plans',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 10h16M8 14.5h3"/></svg></span><span class="nav-label">充值套餐</span></button>
       <button onclick="tab('records',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg></span><span class="nav-label">平台记录</span></button>
       <button onclick="tab('users',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 19a7 7 0 0 1 14 0M18 6a3 3 0 0 1 1 5M20 14a5 5 0 0 1 1.5 3"/></svg></span><span class="nav-label">用户管理</span></button>
+      <button onclick="tab('agent',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6"/></svg></span><span class="nav-label">Agent 接入</span></button>
       <button onclick="tab('webhook',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 16h12l-1.5-2V10a4.5 4.5 0 0 0-9 0v4L6 16ZM10 19h4"/></svg></span><span class="nav-label">通知与 Webhook</span></button>
       <button onclick="tab('security',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m12 3 7 3v5c0 4.2-2.8 7.7-7 10-4.2-2.3-7-5.8-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="nav-label">安全设置</span></button>
     </nav>
@@ -99,8 +100,21 @@
           <div class="field"><label>副标题</label><input id="pSummary" maxlength="200" placeholder="一句话说明，显示在商品卡片上"></div>
           <div class="field"><label>商品详情</label><textarea id="pDesc" rows="3" maxlength="4000" style="resize:vertical"></textarea></div>
           <div class="cols">
+            <div class="field"><label for="pKind">商品类型</label><select id="pKind" onchange="syncProductKind()"><option value="SINGLE">普通商品 · 一次交付</option><option value="SUBSCRIPTION">订阅系列 · 持续更新</option></select><span class="hint">有待确认 / 已成交订单或系列更新后，不可切换类型。</span></div>
+            <div class="field" id="repeatField"><label for="pRepeat">重复购买</label><select id="pRepeat"><option value="0">不允许（默认）</option><option value="1">允许重复购买</option></select><span class="hint">仅影响普通商品；限时订阅可手动续费，永久订阅无需重复购买。</span></div>
+          </div>
+          <div class="series-terms hidden" id="subscriptionFields">
+            <div class="series-terms-title"><span>↻</span><div><b>订阅规则</b><small>一次兑换开通权益，不会自动扣费。</small></div></div>
+            <div class="cols3">
+              <div class="field"><label for="pSubMode">订阅时长</label><select id="pSubMode" onchange="syncProductKind()"><option value="permanent">永久</option><option value="timed">限时 · 手动续费</option></select></div>
+              <div class="field" id="subDaysField"><label for="pSubDays">有效天数</label><input id="pSubDays" type="number" min="1" max="3650" step="1" value="30"><span class="hint">1–3650 天，到期停止站内访问。</span></div>
+              <div class="field"><label for="pFrequency">内容更新频率</label><select id="pFrequency"><option value="IRREGULAR">不定期</option><option value="DAILY">每日</option><option value="WEEKLY">每周</option></select><span class="hint">仅说明更新频率，并非扣费周期。</span></div>
+            </div>
+            <div class="field"><label for="pSeriesPreview">公开目录（可选，每行一项）</label><textarea id="pSeriesPreview" rows="4" maxlength="50000" placeholder="第一期/&#10;第一期/资源名称.pdf"></textarea><span class="hint">仅填写可公开的文件 / 文件夹名称，不要填写下载链接或提取码。保存后通过「系列更新」发布私密内容。</span><label class="checkline"><input id="pSeriesPartial" type="checkbox"> 标记为部分目录（尚未列出全部内容）</label></div>
+          </div>
+          <div class="cols">
             <div class="field"><label>封面图地址（可选）</label><input id="pCover" maxlength="500" placeholder="https://… 或 /cover.png"></div>
-            <div class="field"><label>交付方式 *</label>
+            <div class="field" id="deliveryTypeField"><label>交付方式 *</label>
               <select id="pType" onchange="syncDeliveryFields()">
                 <option value="TEXT">文本内容</option>
                 <option value="LINK">链接（网盘 / 外部地址）</option>
@@ -135,7 +149,8 @@
               <div class="assist-content">
                 <div class="catalog-tools"><div class="field"><label for="pShareCode">提取码（可选，仅用于读取）</label><input id="pShareCode" type="password" maxlength="16" autocomplete="off" placeholder="如分享需要提取码" oninput="onShareCodeChanged()"></div><button type="button" class="btn secondary" id="readCatalogButton" onclick="fetchCatalog(this)">读取网盘目录</button></div>
                 <div class="hint" id="catalogStatus" aria-live="polite">链接变更后会尝试自动读取；受登录、风控限制时可手动填写。</div>
-                <div class="field"><label for="pPreview">公开目录（每行一项，文件夹以 / 结尾）</label><textarea id="pPreview" rows="5" maxlength="30000" placeholder="课程资料/&#10;课程资料/第一讲.mp4&#10;使用说明.pdf" oninput="markCatalogManual()"></textarea></div>
+                <div class="field"><label for="pPreview">公开目录（每行一项，文件夹以 / 结尾）</label><textarea id="pPreview" rows="5" maxlength="50000" placeholder="课程资料/&#10;课程资料/第一讲.mp4&#10;使用说明.pdf" oninput="markCatalogManual()"></textarea></div>
+                <label class="checkline"><input id="pCatalogPartial" type="checkbox" onchange="onCatalogPartialChanged()"> 标记为部分目录（尚未列出全部内容）</label>
                 <span class="hint">目录将公开展示，请勿填写链接、提取码或其他私密内容；最多 150 项。上面的提取码只用于读取，不会单独交付；若买家需要，可将 ?pwd=提取码附在交付链接中。</span>
               </div>
             </div>
@@ -166,6 +181,23 @@
         </div>
 
         <div id="goodsOut"><div class="state">正在加载商品…</div></div>
+        <section class="series-manager hidden" id="seriesManager" aria-labelledby="seriesHeading">
+          <div class="panel-title"><div><div class="series-eyebrow">SERIES UPDATES</div><h2 id="seriesHeading">系列更新</h2></div><button class="rowbtn" type="button" onclick="closeSeries()">关闭</button></div>
+          <p class="sub">追加文字、链接或文件。发布后仅有效订阅者可查看全部历史及新增内容；草稿对订阅者不可见。</p>
+          <div class="series-editor">
+            <div class="panel-title"><b id="updateEditorTitle">添加一期更新</b><button type="button" class="rowbtn" onclick="resetSeriesEditor()">清空 / 新建</button></div>
+            <input type="hidden" id="uId">
+            <div class="cols"><div class="field"><label for="uTitle">更新标题 *</label><input id="uTitle" maxlength="120" placeholder="例如：第 01 期 · 每周精选"></div><div class="field"><label for="uStatus">发布状态</label><select id="uStatus"><option value="PUBLISHED">发布给有效订阅者</option><option value="HIDDEN">草稿 / 隐藏</option></select></div></div>
+            <div class="field"><label for="uSummary">简介（可选）</label><input id="uSummary" maxlength="500" placeholder="简要介绍本次更新"></div>
+            <div class="field"><label for="uType">内容类型</label><select id="uType" onchange="syncUpdateFields()"><option value="TEXT">文字</option><option value="LINK">链接</option><option value="FILE">文件</option></select></div>
+            <div class="field" id="uTextField"><label for="uText">私密文字 *</label><textarea id="uText" rows="4" maxlength="20000" placeholder="订阅者可见的内容"></textarea></div>
+            <div class="field hidden" id="uLinkField"><label for="uLink">私密链接 *</label><input id="uLink" maxlength="2000" placeholder="https://…"><span class="hint">站内到期后不可再查看，但已复制的外部链接无法由本站收回。</span></div>
+            <div class="hidden" id="uFileField"><div class="field"><label for="uFile">上传更新文件（最大 50 MB）</label><input id="uFile" type="file" onchange="uploadSeriesFile(this)"></div><div class="cols"><div class="field"><label for="uFileKey">文件 key</label><input id="uFileKey" maxlength="512" placeholder="上传后自动填入"></div><div class="field"><label for="uFileName">下载显示名</label><input id="uFileName" maxlength="120"></div></div></div>
+            <button type="button" class="btn" onclick="saveSeriesUpdate(this)">保存更新</button>
+          </div>
+          <div id="seriesUpdates" class="series-updates" aria-live="polite"></div>
+          <div class="actions"><button type="button" class="btn secondary" id="seriesPrev" onclick="loadSeries(seriesOffset-50)">上一页</button><button type="button" class="btn secondary" id="seriesNext" onclick="loadSeries(seriesOffset+50)">下一页</button></div>
+        </section>
       </div>
     </section>
 
@@ -259,6 +291,19 @@
         </div>
         <div class="state" id="usersMeta" style="margin-bottom:10px">尚未加载</div>
         <div id="usersOut"></div>
+      </div>
+    </section>
+
+    <!-- Agent -->
+    <section class="view hidden" id="view-agent">
+      <div class="panel agent-panel">
+        <div class="series-eyebrow">EXTERNAL AGENT API</div><h2>让 Agent 帮你整理商品</h2>
+        <p class="sub">已有安全隔离的外部 Agent 接口：先上传文件，再创建下架草稿；商品必须由管理员审核后手动上架。Agent 不能发布、修改其他商品或读取订单。</p>
+        <div class="agent-state"><span id="agentState">正在读取接口状态…</span><span id="agentStorage">R2 状态待确认</span></div>
+        <div class="agent-steps"><div><b>01</b><span>上传文件<small>POST /api/agent/uploads · 最大 50 MB</small></span></div><div><b>02</b><span>创建草稿<small>POST /api/agent/drafts · 支持幂等重试</small></span></div><div><b>03</b><span>人工审核<small>在商品管理中检查内容并上架</small></span></div></div>
+        <div class="notice-line">启用需配置独立 Worker Secret <code>AGENT_API_TOKEN</code>（32–512 个非空白字符）并绑定 R2。凭据只应在受信任的 Agent 运行环境中提供；不要放进提示词、仓库、聊天或链接。</div>
+        <div class="actions"><button type="button" class="btn" onclick="copyAgentPrompt(this)">复制 agent.md 提示词</button><button type="button" class="btn secondary" onclick="loadStatus(this)">刷新接口状态</button></div>
+        <details class="agent-preview"><summary>查看将复制的提示词</summary><pre id="agentPrompt"></pre></details>
       </div>
     </section>
 
@@ -409,6 +454,8 @@ async function loadStatus(button) {
     $('#dbState').textContent = s.databaseConfigured ? '已连接' : '未连接';
     $('#hookState').textContent = s.webhookSecretConfigured ? '已配置' : '待配置';
     $('#storageState').textContent = STORAGE ? '已绑定 R2' : '未绑定';
+    $('#agentState').textContent = s.agentConfigured ? 'Agent 令牌已配置' : 'Agent 接口未启用';
+    $('#agentStorage').textContent = STORAGE ? 'R2 已绑定' : 'R2 未绑定';
     $('#sideStatus').textContent = s.apiKeyConfigured ? '支付凭证就绪' : '缺少支付凭证';
     $('#storageHint').textContent = STORAGE
       ? '文件上传到 Cloudflare R2，用户通过订单专属链接下载，不公开可枚举。'
@@ -628,7 +675,7 @@ function renderGoods(items) {
   $('#goodsOut').innerHTML = `<table><thead><tr>
       <th>商品</th><th>积分价</th><th>交付</th><th>库存</th><th>已售</th><th>状态</th><th>操作</th>
     </tr></thead><tbody>${items.map(p => {
-      const typeLabel = { TEXT: '文本', LINK: '链接', FILE: '文件' }[p.delivery_type] || p.delivery_type;
+      const typeLabel = p.product_kind === 'SUBSCRIPTION' ? `系列订阅 · ${Number(p.subscription_days) ? Number(p.subscription_days) + ' 天' : '永久'}` : ({ TEXT: '文本', LINK: '链接', FILE: '文件' }[p.delivery_type] || p.delivery_type);
       const stock = (p.stock === null || p.stock === undefined) ? '不限' : String(p.stock);
       const thumb = p.cover_url ? `<img class="thumb" src="${esc(p.cover_url)}" alt="">` : `<div class="thumb"></div>`;
       const tags = Array.isArray(p.tags) ? p.tags : [];
@@ -641,6 +688,7 @@ function renderGoods(items) {
         <td data-label="状态">${p.status === 'ACTIVE' ? '<span class="pill ok">上架</span>' : '<span class="pill off">下架</span>'}</td>
         <td class="row-actions" data-label="操作">
           <button class="rowbtn primary-row" onclick="editGoods('${p.id}')">编辑</button>
+          ${p.product_kind === 'SUBSCRIPTION' ? `<button class="rowbtn" onclick="openSeries('${p.id}')">系列更新</button>` : ''}
           <button class="rowbtn" onclick="toggleGoods('${p.id}')">${p.status === 'ACTIVE' ? '下架' : '上架'}</button>
           <button class="rowbtn danger" onclick="deleteGoods('${p.id}')">删除</button>
         </td>
@@ -673,8 +721,12 @@ function updateProviderHint() {
   return label;
 }
 function markCatalogManual() {
-  invalidateCatalogRequest(); catalogSource = 'manual'; catalogTruncated = false;
-  $('#catalogStatus').textContent = '手动编辑的目录会在保存商品后公开展示。';
+  invalidateCatalogRequest(); catalogSource = 'manual';
+  catalogTruncated = Boolean($('#pCatalogPartial').checked);
+  $('#catalogStatus').textContent = '手动编辑的目录会在保存商品后公开展示；请确认是否仍为部分目录。';
+}
+function onCatalogPartialChanged() {
+  invalidateCatalogRequest(); catalogTruncated = Boolean($('#pCatalogPartial').checked);
 }
 function onShareCodeChanged() {
   invalidateCatalogRequest();
@@ -684,7 +736,7 @@ function onShareLinkInput() {
   updateProviderHint();
   if ($('#pLink').value.trim() !== lastShareLink) {
     invalidateCatalogRequest();
-    $('#pPreview').value = ''; catalogSource = 'manual'; catalogTruncated = false;
+    $('#pPreview').value = ''; catalogSource = 'manual'; catalogTruncated = false; $('#pCatalogPartial').checked = false;
     $('#catalogStatus').textContent = '链接已变更，离开输入框后尝试读取。';
   }
 }
@@ -692,7 +744,7 @@ function onShareLinkChanged() {
   const link = $('#pLink').value.trim();
   if (link !== lastShareLink) {
     lastShareLink = link; invalidateCatalogRequest();
-    $('#pPreview').value = ''; catalogSource = 'manual'; catalogTruncated = false;
+    $('#pPreview').value = ''; catalogSource = 'manual'; catalogTruncated = false; $('#pCatalogPartial').checked = false;
     $('#catalogStatus').textContent = '链接已变更，旧目录已清空。';
     if (updateProviderHint()) fetchCatalog($('#readCatalogButton'));
   }
@@ -713,7 +765,7 @@ function fetchCatalog(button) {
       if (serial !== catalogSerial || editor !== editorSerial || $('#pLink').value.trim() !== link) return;
       if (!data.items?.length) { $('#catalogStatus').textContent = '未读取到文件；可检查分享或手动填写目录。'; return; }
       $('#pPreview').value = data.items.join('\n');
-      catalogSource = data.provider?.id || 'manual'; catalogTruncated = Boolean(data.truncated);
+      catalogSource = data.provider?.id || 'manual'; catalogTruncated = Boolean(data.truncated); $('#pCatalogPartial').checked = catalogTruncated;
       $('#catalogStatus').textContent = `已读取 ${data.items.length} 项${data.truncated ? '（仅部分目录）' : ''}。${data.warning?.message || '请检查后保存商品。'}`;
     } catch (error) {
       if (serial === catalogSerial && editor === editorSerial && $('#pLink').value.trim() === link) $('#catalogStatus').textContent = error.message;
@@ -752,20 +804,33 @@ function resetAssistFields() {
   $('#generatedCover').classList.add('hidden'); $('#generatedCoverImage').removeAttribute('src');
 }
 function syncDeliveryFields() {
-  const t = $('#pType').value;
+  const t = $('#pKind').value === 'SUBSCRIPTION' ? 'NONE' : $('#pType').value;
+  if (t !== 'LINK' && catalogPending) {
+    invalidateCatalogRequest();
+    $('#catalogStatus').textContent = '已取消读取；切回链接交付后可重新读取目录。';
+  }
   $('#fieldText').classList.toggle('hidden', t !== 'TEXT');
   $('#fieldLink').classList.toggle('hidden', t !== 'LINK');
   $('#fieldFile').classList.toggle('hidden', t !== 'FILE');
 }
+function syncProductKind() {
+  const series = $('#pKind').value === 'SUBSCRIPTION';
+  $('#subscriptionFields').classList.toggle('hidden', !series);
+  $('#repeatField').classList.toggle('hidden', series);
+  $('#deliveryTypeField').classList.toggle('hidden', series);
+  $('#subDaysField').classList.toggle('hidden', $('#pSubMode').value !== 'timed');
+  syncDeliveryFields();
+}
 function newGoods() {
   resetAssistFields(); lastShareLink = ''; catalogSource = 'manual'; catalogTruncated = false;
-  $('#pPreview').value = ''; $('#catalogStatus').textContent = '链接变更后会尝试自动读取；受登录、风控限制时可手动填写。';
+  $('#pPreview').value = ''; $('#pCatalogPartial').checked = false; $('#pSeriesPartial').checked = false; $('#catalogStatus').textContent = '链接变更后会尝试自动读取；受登录、风控限制时可手动填写。';
   $('#editorTitle').textContent = '上架新商品';
   ['pId', 'pTitle', 'pSummary', 'pDesc', 'pCover', 'pText', 'pLink', 'pFileKey', 'pFileName', 'pStock', 'pTags'].forEach(k => $('#' + k).value = '');
   $('#pPrice').value = ''; $('#pSort').value = '0'; $('#pType').value = 'TEXT'; $('#pStatus').value = 'ACTIVE';
+  $('#pKind').value = 'SINGLE'; $('#pRepeat').value = '0'; $('#pSubMode').value = 'permanent'; $('#pSubDays').value = '30'; $('#pFrequency').value = 'IRREGULAR'; $('#pSeriesPreview').value = '';
   renderCategoryOptions(); $('#pCategory').value = '';
   $('#pFile').value = '';
-  updateProviderHint(); syncDeliveryFields();
+  updateProviderHint(); syncProductKind();
   $('#goodsEditor').classList.remove('hidden');
   $('#goodsEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -781,11 +846,15 @@ function editGoods(id) {
   $('#pCover').value = p.cover_url || '';
   renderCategoryOptions(); $('#pCategory').value = p.category_id || '';
   $('#pTags').value = Array.isArray(p.tags) ? p.tags.join(', ') : '';
+  $('#pKind').value = p.product_kind || 'SINGLE'; $('#pRepeat').value = p.allow_repeat ? '1' : '0';
+  $('#pSubMode').value = Number(p.subscription_days) > 0 ? 'timed' : 'permanent'; $('#pSubDays').value = Number(p.subscription_days) > 0 ? p.subscription_days : 30;
+  $('#pFrequency').value = p.update_frequency || 'IRREGULAR'; $('#pSeriesPreview').value = Array.isArray(p.preview_files) && p.product_kind === 'SUBSCRIPTION' ? p.preview_files.join('\n') : '';
   $('#pType').value = p.delivery_type || 'TEXT';
   $('#pText').value = p.delivery_text || '';
   $('#pLink').value = p.delivery_url || ''; lastShareLink = $('#pLink').value.trim();
   $('#pPreview').value = Array.isArray(p.preview_files) ? p.preview_files.join('\n') : '';
   catalogSource = p.preview_source || 'manual'; catalogTruncated = Boolean(p.preview_truncated);
+  $('#pCatalogPartial').checked = catalogTruncated; $('#pSeriesPartial').checked = catalogTruncated;
   $('#catalogStatus').textContent = $('#pPreview').value ? `已保存的目录${catalogTruncated ? '（仅部分）' : ''}；可刷新或手动编辑。` : '暂无目录，可读取或手动填写。';
   updateProviderHint();
   $('#pFileKey').value = p.file_key || '';
@@ -793,7 +862,7 @@ function editGoods(id) {
   $('#pStock').value = (p.stock === null || p.stock === undefined) ? '' : p.stock;
   $('#pStatus').value = p.status || 'ACTIVE';
   $('#pSort').value = p.sort_order ?? 0;
-  syncDeliveryFields();
+  syncProductKind();
   $('#goodsEditor').classList.remove('hidden');
   $('#goodsEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -820,13 +889,16 @@ async function saveGoods(button) {
   // The link or passcode can change while an earlier read is in flight. Wait
   // for the latest request, not just the one that existed when Save was hit.
   while (editor === editorSerial) {
-    if ($('#pType').value === 'LINK' && $('#pLink').value.trim() !== lastShareLink) onShareLinkChanged();
+    if ($('#pKind').value !== 'SUBSCRIPTION' && $('#pType').value === 'LINK' && $('#pLink').value.trim() !== lastShareLink) onShareLinkChanged();
     const pending = catalogPending;
     if (!pending) break;
     await pending;
     if (catalogPending === pending) catalogPending = null;
   }
   if (editor !== editorSerial) return;
+  const series = $('#pKind').value === 'SUBSCRIPTION';
+  const days = series && $('#pSubMode').value === 'timed' ? Number($('#pSubDays').value) : 0;
+  if (series && $('#pSubMode').value === 'timed' && (!Number.isInteger(days) || days < 1 || days > 3650)) return toast('限时订阅请填写 1–3650 天');
   const payload = {
     title: $('#pTitle').value,
     summary: $('#pSummary').value,
@@ -835,14 +907,17 @@ async function saveGoods(button) {
     cover_url: $('#pCover').value,
     category_id: $('#pCategory').value || null,
     tags: $('#pTags').value,
+    product_kind: $('#pKind').value,
+    allow_repeat: $('#pRepeat').value === '1',
+    subscription_days: days, update_frequency: $('#pFrequency').value,
     delivery_type: $('#pType').value,
-    delivery_text: $('#pText').value,
-    delivery_url: $('#pLink').value,
-    preview_files: $('#pPreview').value,
-    preview_source: catalogSource,
-    preview_truncated: catalogTruncated,
-    file_key: $('#pFileKey').value,
-    file_name: $('#pFileName').value,
+    delivery_text: !series && $('#pType').value === 'TEXT' ? $('#pText').value : '',
+    delivery_url: !series && $('#pType').value === 'LINK' ? $('#pLink').value : '',
+    preview_files: series ? $('#pSeriesPreview').value : ($('#pType').value === 'LINK' ? $('#pPreview').value : ''),
+    preview_source: series ? 'manual' : catalogSource,
+    preview_truncated: series ? $('#pSeriesPartial').checked : catalogTruncated,
+    file_key: !series && $('#pType').value === 'FILE' ? $('#pFileKey').value : '',
+    file_name: !series && $('#pType').value === 'FILE' ? $('#pFileName').value : '',
     stock: $('#pStock').value === '' ? null : Number($('#pStock').value),
     status: $('#pStatus').value,
     sort_order: Number($('#pSort').value || 0),
@@ -996,6 +1071,126 @@ async function deleteUser(id) {
   if (!confirm('再次确认删除 ' + u.email + ' ？')) return;
   try { await api('/api/admin/users/' + encodeURIComponent(id), { method: 'DELETE' }); toast('账号已删除'); loadUsers(); } catch (e) { toast(e.message); }
 }
+
+/* ---------- 订阅系列更新 ---------- */
+let seriesTarget = '', seriesOffset = 0, seriesItems = {}, seriesSerial = 0, seriesFormSerial = 0, seriesUploading = false;
+function syncUpdateFields() {
+  const type = $('#uType').value;
+  $('#uTextField').classList.toggle('hidden', type !== 'TEXT');
+  $('#uLinkField').classList.toggle('hidden', type !== 'LINK');
+  $('#uFileField').classList.toggle('hidden', type !== 'FILE');
+}
+function resetSeriesEditor() {
+  seriesFormSerial++; seriesUploading = false;
+  ['uId', 'uTitle', 'uSummary', 'uText', 'uLink', 'uFileKey', 'uFileName', 'uFile'].forEach(id => $('#' + id).value = '');
+  $('#uType').value = 'TEXT'; $('#uStatus').value = 'PUBLISHED';
+  $('#updateEditorTitle').textContent = '添加一期更新'; syncUpdateFields();
+}
+function openSeries(id) {
+  const product = GOODS[id]; if (!product || product.product_kind !== 'SUBSCRIPTION') return;
+  seriesTarget = id; seriesOffset = 0; seriesSerial++; resetSeriesEditor();
+  $('#seriesHeading').textContent = product.title + ' · 系列更新';
+  $('#seriesManager').classList.remove('hidden');
+  $('#seriesManager').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  loadSeries(0);
+}
+function closeSeries() {
+  seriesTarget = ''; seriesSerial++; resetSeriesEditor();
+  $('#seriesManager').classList.add('hidden');
+}
+async function loadSeries(offset = 0) {
+  if (!seriesTarget) return;
+  const target = seriesTarget, serial = ++seriesSerial;
+  seriesOffset = Math.max(0, offset);
+  $('#seriesUpdates').innerHTML = '<div class="state">正在读取系列更新…</div>';
+  $('#seriesPrev').disabled = true; $('#seriesNext').disabled = true;
+  try {
+    const data = await api('/api/admin/products/' + encodeURIComponent(target) + '/updates?offset=' + seriesOffset);
+    if (serial !== seriesSerial || target !== seriesTarget) return;
+    seriesItems = {}; (data.items || []).forEach(item => seriesItems[item.id] = item);
+    $('#seriesUpdates').innerHTML = data.items?.length ? data.items.map(item => `<article class="series-update-row"><div><b>${esc(item.title)}</b><small>${esc(fmt(item.created_at))} · ${esc(({TEXT:'文字',LINK:'链接',FILE:'文件'})[item.delivery_type] || '')}${item.summary ? ' · ' + esc(item.summary) : ''}</small></div><span class="pill ${item.status === 'PUBLISHED' ? 'ok' : 'off'}">${item.status === 'PUBLISHED' ? '已发布' : '草稿'}</span><div class="row-actions"><button class="rowbtn" onclick="editSeriesUpdate('${item.id}')">编辑</button><button class="rowbtn danger" onclick="deleteSeriesUpdate('${item.id}')">删除</button></div></article>`).join('') : '<div class="state">还没有更新。添加并发布后，有效订阅者即可查看。</div>';
+    $('#seriesPrev').disabled = seriesOffset === 0; $('#seriesNext').disabled = !data.has_more;
+  } catch (error) {
+    if (serial === seriesSerial) $('#seriesUpdates').innerHTML = `<div class="state">${esc(error.message)}</div>`;
+  }
+}
+function editSeriesUpdate(id) {
+  const item = seriesItems[id]; if (!item) return;
+  resetSeriesEditor();
+  $('#updateEditorTitle').textContent = '编辑更新 · ' + item.title;
+  $('#uId').value = item.id; $('#uTitle').value = item.title || ''; $('#uSummary').value = item.summary || '';
+  $('#uType').value = item.delivery_type; $('#uStatus').value = item.status;
+  $('#uText').value = item.delivery_text || ''; $('#uLink').value = item.delivery_url || '';
+  $('#uFileKey').value = item.file_key || ''; $('#uFileName').value = item.file_name || '';
+  syncUpdateFields(); $('.series-editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function uploadSeriesFile(input) {
+  const file = input.files?.[0]; if (!file) return;
+  if (!STORAGE) { input.value = ''; return toast('请先绑定 R2 存储'); }
+  if (file.size > 50 * 1024 * 1024 || !file.size) { input.value = ''; return toast('请选择不超过 50 MB 的非空文件'); }
+  const target = seriesTarget, serial = ++seriesFormSerial;
+  seriesUploading = true; input.disabled = true;
+  const form = new FormData(); form.append('file', file); toast('正在上传更新文件…');
+  try {
+    const response = await fetch('/api/admin/upload', { method: 'POST', body: form, cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '上传失败');
+    if (target !== seriesTarget || serial !== seriesFormSerial) return;
+    $('#uFileKey').value = data.key; $('#uFileName').value = data.name || file.name; toast('文件已上传，请保存更新');
+  } catch (error) { if (target === seriesTarget && serial === seriesFormSerial) toast(error.message); }
+  finally { input.disabled = false; if (serial === seriesFormSerial) seriesUploading = false; }
+}
+async function saveSeriesUpdate(button) {
+  if (!seriesTarget) return;
+  if (seriesUploading) return toast('请等待文件上传完成');
+  const target = seriesTarget, serial = seriesFormSerial, updateId = $('#uId').value;
+  const payload = { title: $('#uTitle').value, summary: $('#uSummary').value, delivery_type: $('#uType').value,
+    delivery_text: $('#uText').value, delivery_url: $('#uLink').value, file_key: $('#uFileKey').value,
+    file_name: $('#uFileName').value, status: $('#uStatus').value };
+  return withBusy(button, async () => {
+    try {
+      await api('/api/admin/products/' + encodeURIComponent(target) + '/updates' + (updateId ? '/' + encodeURIComponent(updateId) : ''), { method: updateId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      toast(updateId ? '更新已保存' : '更新已添加');
+      if (target === seriesTarget) { if (serial === seriesFormSerial) resetSeriesEditor(); await loadSeries(0); }
+    } catch (error) { toast(error.message); }
+  });
+}
+async function deleteSeriesUpdate(id) {
+  const item = seriesItems[id], target = seriesTarget; if (!item || !target) return;
+  if (!confirm('删除「' + item.title + '」？删除后订阅者将无法在站内查看此更新。')) return;
+  try { await api('/api/admin/products/' + encodeURIComponent(target) + '/updates/' + encodeURIComponent(id), { method: 'DELETE' });
+    toast('更新已删除'); if (target === seriesTarget) { if ($('#uId').value === id) resetSeriesEditor(); await loadSeries(seriesOffset); }
+  } catch (error) { toast(error.message); }
+}
+
+/* ---------- Agent 接入说明（仅占位符，不含真实凭据） ---------- */
+function agentMarkdown() {
+  return `# agent.md · 积分商店 Agent
+
+你是商品整理助手。只处理用户明确授权的文件，检查内容、版权和价格；不确定时先询问。你不能上架商品或管理用户、订单。
+
+## 连接
+- API 基址：${location.origin}
+- 凭据：从受信任运行环境的 AGENT_API_TOKEN 环境变量读取（占位符：<AGENT_API_TOKEN>）。只通过 HTTPS 的 Authorization: Bearer 头发送。
+- 不要把令牌、个人信息或私密文件内容写进聊天、日志、URL、仓库或本提示词。无凭据时停止并请管理员通过安全方式配置，勿索取密码或验证码。
+
+## 工作流
+1. 确认管理员指定的文件、商品标题和整数积分价格；单文件不超过 50 MB。
+2. POST /api/agent/uploads，使用 multipart/form-data 的 file 字段上传文件；记录返回的 key 和 name。
+3. POST /api/agent/drafts，发送 JSON：{"idempotency_key":"<唯一任务编号>","title":"<商品标题>","price_points":20,"file_key":"<上传返回的 key>","file_name":"<文件名>","summary":"<简介>"}。
+4. 创建成功仅表示草稿已保存，状态固定为 HIDDEN。告知管理员到商品管理审核后手动上架，不得声称已发布。
+5. 草稿请求超时或失败时使用相同幂等编号和完全相同的内容重试；不同任务必须使用新编号。上传本身不去重，重复上传可能产生待清理文件。
+
+仅调用以上两个接口。不要尝试上架、编辑已有商品、读取用户数据或订单；遇到 401/503 时停止并通知管理员检查配置。
+`;
+}
+async function copyAgentPrompt(button) {
+  return withBusy(button, async () => {
+    try { await navigator.clipboard.writeText(agentMarkdown()); toast('agent.md 提示词已复制'); }
+    catch { $('#agentPrompt').textContent = agentMarkdown(); $('.agent-preview').open = true; toast('复制失败，请在下方手动复制'); }
+  });
+}
+$('#agentPrompt').textContent = agentMarkdown();
 
 /* ---------- 通知 / 安全 ---------- */
 async function loadWebhook() { try { pretty($('#webhookState'), await api('/api/admin/webhook')); } catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); } }

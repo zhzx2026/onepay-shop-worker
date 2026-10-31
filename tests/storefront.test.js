@@ -25,6 +25,7 @@ function makeStore({ config = {}, auth = {} } = {}) {
     URLSearchParams,
     FormData,
     HTMLImageElement,
+    requestAnimationFrame: callback => callback(),
     fetch: async (path, options) => {
       requests.push({ path, options });
       return { ok: true, json: async () => path === '/api/config' ? config : auth };
@@ -138,4 +139,57 @@ test('multiple selected tags must all match and preserve legacy single-tag links
   ];
   assert.deepEqual(Array.from(store.filterProducts(products, [], { tags: ['设计', '模板'] }), p => p.id), ['both']);
   assert.deepEqual(Array.from(store.filterProducts(products, [], { tag: '设计' }), p => p.id), ['both', 'design']);
+});
+
+test('public catalog renders escaped, expandable folders and individual filenames', () => {
+  const { store } = makeStore();
+  const html = store.catalogTreeHtml(['资料/', '资料/一层/文件.pdf', '资料/一层/<img onerror=alert(1)>.txt', '独立.txt']);
+  assert.match(html, /<details class="tree-folder">/);
+  assert.match(html, /文件\.pdf/);
+  assert.match(html, /独立\.txt/);
+  assert.match(html, /&lt;img onerror=alert\(1\)&gt;\.txt/);
+  assert.ok(!html.includes('<img onerror'));
+  assert.ok(!html.includes('https://'));
+});
+
+test('subscription delivery links to the private account area without exposing content', () => {
+  const { store } = makeStore();
+  const html = store.deliveryHtml({ type: 'SUBSCRIPTION', product_id: 'prd_safe' });
+  assert.match(html, /\/account\?tab=subscriptions&product=prd_safe/);
+  assert.match(html, /我的订阅/);
+});
+
+test('modal focus is contained and restored, and an in-flight modal cannot close', async () => {
+  const { store, document, nodes, listeners } = makeStore();
+  const bodyClasses = new Set(), modalClasses = new Set();
+  document.body = { classList: { add: x => bodyClasses.add(x), remove: x => bodyClasses.delete(x) } };
+  const trigger = { isConnected: true, focus: () => { document.activeElement = trigger; } };
+  const first = { getClientRects: () => [1], focus: () => { document.activeElement = first; } };
+  const last = { getClientRects: () => [1], focus: () => { document.activeElement = last; } };
+  let busy = false;
+  const modal = {
+    classList: { add: x => modalClasses.add(x), remove: x => modalClasses.delete(x), contains: x => modalClasses.has(x) },
+    getAttribute: name => name === 'aria-busy' && busy ? 'true' : null,
+    querySelector: () => last,
+    querySelectorAll: () => busy ? [] : [first, last],
+    setAttribute: () => {}, focus: () => { document.activeElement = modal; },
+    contains: target => target === first || target === last || target === modal,
+  };
+  document.querySelector = selector => selector === '.modal.show' && modalClasses.has('show') ? modal : null;
+  nodes['.modal.show'] = [modal]; document.activeElement = trigger;
+  store.setModal(modal, true, '#confirm');
+  assert.equal(document.activeElement, last); assert.ok(bodyClasses.has('modal-open'));
+  let prevented = false;
+  listeners.keydown({ key: 'Tab', preventDefault: () => { prevented = true; } });
+  assert.ok(prevented); assert.equal(document.activeElement, first);
+  listeners.keydown({ key: 'Tab', shiftKey: true, preventDefault: () => {} });
+  assert.equal(document.activeElement, last);
+  busy = true; listeners.keydown({ key: 'Tab', preventDefault: () => {} });
+  assert.equal(document.activeElement, modal);
+  listeners.keydown({ key: 'Escape', preventDefault: () => {} });
+  assert.ok(modalClasses.has('show'));
+  busy = false; listeners.keydown({ key: 'Escape', preventDefault: () => {} });
+  assert.ok(!modalClasses.has('show')); assert.ok(!bodyClasses.has('modal-open')); assert.equal(document.activeElement, trigger);
+  const css = await readFile(new URL('../public/storefront.css', import.meta.url), 'utf8');
+  assert.match(css, /\.modal\.show\s*\{[^}]*visibility:\s*visible[^}]*transition:[^}]*visibility\s+0s/);
 });
