@@ -30,3 +30,7 @@ SITE_DESCRIPTION = "支付宝安全充值积分 · 积分兑换数字商品"
 COOKIE_NAME = "onepay_session"
 ADMIN_COOKIE_NAME = "onepay_admin_session"
 SESSION_DAYS = "14"
+
+# Workers AI is used only when an administrator explicitly generates a cover.
+[ai]
+binding = "AI"

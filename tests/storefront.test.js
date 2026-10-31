@@ -128,3 +128,14 @@ test('storefront pages use matching versioned CSS and JavaScript assets', async 
     assert.equal(cssVersion, version, 'all storefront pages should use the same version');
   }
 });
+
+test('multiple selected tags must all match and preserve legacy single-tag links', () => {
+  const { store } = makeStore();
+  const products = [
+    { id: 'both', tags: ['设计', '模板'] },
+    { id: 'design', tags: ['设计'] },
+    { id: 'template', tags: ['模板'] },
+  ];
+  assert.deepEqual(Array.from(store.filterProducts(products, [], { tags: ['设计', '模板'] }), p => p.id), ['both']);
+  assert.deepEqual(Array.from(store.filterProducts(products, [], { tag: '设计' }), p => p.id), ['both', 'design']);
+});

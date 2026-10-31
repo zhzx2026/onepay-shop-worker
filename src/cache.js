@@ -6,7 +6,7 @@ export const PUBLIC_CACHE_POLICIES = Object.freeze({
   '/api/product': { scope: 'plans', edgeTtl: 60, browserTtl: 10 },
 });
 
-const CACHE_NAMESPACE = '/.onepay-cache/v2';
+const CACHE_NAMESPACE = '/.onepay-cache/v3';
 const GENERATION_TTL = 86400;
 const PUBLIC_PAGES = new Set(['/', '/index.html', '/shop', '/shop.html', '/account', '/account.html']);
 const STATIC_FILES = new Set(['/storefront.css', '/storefront.js', '/admin.css']);
@@ -19,16 +19,22 @@ function generationKey(origin, scope) {
   return new Request(`${origin}${CACHE_NAMESPACE}/generation/${scope}`);
 }
 
+// Keep the public cache key and catalog filtering in lockstep for repeated tags.
+export function productTagFilters(params) {
+  return [...new Set(params.getAll('tag').map(value => String(value).trim().slice(0, 24)).filter(Boolean))].sort().slice(0, 8);
+}
+
 function dataKey(request, generation) {
   const original = new URL(request.url);
   const key = new URL(`${original.origin}${CACHE_NAMESPACE}${original.pathname}`);
   key.searchParams.set('generation', generation);
   if (original.pathname === '/api/products') {
     // Match listProducts' normalization. Ignore tracking parameters and order.
-    for (const [name, limit] of [['q', 64], ['category', 64], ['tag', 24]]) {
+    for (const [name, limit] of [['q', 64], ['category', 64]]) {
       const value = String(original.searchParams.get(name) || '').trim().slice(0, limit);
       if (value) key.searchParams.set(name, value);
     }
+    for (const tag of productTagFilters(original.searchParams)) key.searchParams.append('tag', tag);
   }
   return new Request(key.toString());
 }

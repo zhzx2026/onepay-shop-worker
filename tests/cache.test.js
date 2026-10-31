@@ -446,3 +446,18 @@ test('generation marker eviction never revives older cached data', async t => {
   assert.equal(response.headers.get('x-cache'), 'MISS');
   assert.equal((await response.json()).revision, 2);
 });
+
+test('repeated tag filters have distinct, order-independent public cache keys', async t => {
+  installCache(t);
+  let calls = 0;
+  const produce = async () => json({ calls: ++calls });
+  const first = await read('/api/products?tag=设计&tag=模板', produce);
+  assert.equal(first.headers.get('x-cache'), 'MISS');
+  const same = await read('/api/products?tag=模板&tag=设计&tag=设计', produce);
+  assert.equal(same.headers.get('x-cache'), 'HIT');
+  const onlyOne = await read('/api/products?tag=设计', produce);
+  const other = await read('/api/products?tag=设计&tag=教程', produce);
+  assert.equal(onlyOne.headers.get('x-cache'), 'MISS');
+  assert.equal(other.headers.get('x-cache'), 'MISS');
+  assert.equal(calls, 3);
+});

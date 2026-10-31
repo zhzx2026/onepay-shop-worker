@@ -4,15 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f8f7fc">
+<link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261031-2">
+<link rel="stylesheet" href="/admin.css?v=20261031-3">
 </head>
 <body>
 
 <div class="loginwrap" id="loginWrap">
   <div class="login-shell">
     <div class="login-intro">
-      <div class="brand"><span class="mark">✳</span><span>积分商店后台<small>STORE MANAGEMENT</small></span></div>
+      <div class="brand"><img class="mark" src="/assets/brand-logo.svg" alt=""><span>积分商店后台<small>STORE MANAGEMENT</small></span></div>
       <div class="login-intro-copy"><div class="login-kicker">YOUR STORE, SIMPLIFIED <span>✦</span></div><h2>好好经营，<br>每一份喜欢。</h2><p>从商品、订单到用户，<br>在这里轻松管理你的数字商店。</p></div>
       <div class="login-illustration" aria-hidden="true"><span>✳</span><div><b>YOUR STORE</b><small>Everything in one place.</small></div></div>
       <div class="login-intro-foot">A LITTLE MORE POSSIBILITY, EVERY DAY.</div>
@@ -32,7 +33,7 @@
 
 <div class="layout hidden" id="app">
   <aside class="side">
-    <div class="brand"><span class="mark">✳</span><span>积分商店后台<small>STORE MANAGEMENT</small></span></div>
+    <div class="brand"><img class="mark" src="/assets/brand-logo.svg" alt=""><span>积分商店后台<small>STORE MANAGEMENT</small></span></div>
     <div class="nav-caption">MENU <span>·</span> 工作台</div>
     <nav class="nav" aria-label="管理导航">
       <button class="active" aria-current="page" onclick="tab('overview',this)"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span class="nav-label">概览</span></button>
@@ -107,9 +108,17 @@
               </select>
             </div>
           </div>
+          <details class="assist-box ai-box">
+            <summary><span class="assist-icon">✦</span><span><b>AI 生成商品封面</b><small>使用 Workers AI · 生成后预览确认</small></span><span class="assist-open">＋</span></summary>
+            <div class="assist-content">
+              <div class="field"><label for="pCoverPrompt">描述想要的画面</label><textarea id="pCoverPrompt" rows="2" maxlength="500" placeholder="例如：温柔的紫色桌面，精致的文件夹与设计素材，现代插画风格，不要文字"></textarea></div>
+              <div class="assist-actions"><button type="button" class="btn secondary" onclick="generateCover(this)">✦ 生成封面预览</button><span class="hint">仅手动调用。共享每日免费额度；付费计划超额可能收费。</span></div>
+              <div id="generatedCover" class="generated-cover hidden"><img id="generatedCoverImage" alt="AI 生成的封面预览"><div><b>封面预览</b><span>确认满意后，点击使用；还需保存商品。</span><button type="button" class="rowbtn primary-row" onclick="applyGeneratedCover()">使用这张封面</button></div></div>
+            </div>
+          </details>
           <div class="cols">
             <div class="field"><label>所属分类</label><select id="pCategory"><option value="">未分类</option></select></div>
-            <div class="field"><label>商品标签</label><input id="pTags" maxlength="200" placeholder="用逗号分隔，例如：模板, 设计, 热门"><span class="hint">最多 8 个标签，前台商品页可按标签筛选。</span></div>
+            <div class="field"><label>商品标签</label><input id="pTags" maxlength="200" placeholder="用逗号分隔，例如：模板, 设计, 热门"><span class="hint">最多 8 个标签；识别到网盘后会自动加入平台标签。</span></div>
           </div>
 
           <div id="fieldText" class="field">
@@ -119,8 +128,17 @@
 
           <div id="fieldLink" class="field hidden">
             <label>交付链接 *</label>
-            <input id="pLink" maxlength="2000" placeholder="https://pan.baidu.com/s/xxxx 或 R2 公开域名链接">
-            <span class="hint">支持网盘分享链接、Cloudflare R2 公开域名、或其他外部下载地址。</span>
+            <input id="pLink" maxlength="2000" placeholder="https://pan.quark.cn/s/… 或 https://pan.baidu.com/s/1…" oninput="updateProviderHint()" onchange="onShareLinkChanged()">
+            <span class="hint">交付链接仅在兑换后可见。夸克、百度公开分享会自动识别来源与标签。</span>
+            <div class="assist-box catalog-editor">
+              <div class="assist-heading"><span class="assist-icon">▤</span><span><b>购买前的资源目录</b><small id="providerHint">粘贴网盘链接，尝试自动读取目录</small></span></div>
+              <div class="assist-content">
+                <div class="catalog-tools"><div class="field"><label for="pShareCode">提取码（可选，仅用于读取）</label><input id="pShareCode" type="password" maxlength="16" autocomplete="off" placeholder="如分享需要提取码"></div><button type="button" class="btn secondary" id="readCatalogButton" onclick="fetchCatalog(this)">读取网盘目录</button></div>
+                <div class="hint" id="catalogStatus" aria-live="polite">链接变更后会尝试自动读取；受登录、风控限制时可手动填写。</div>
+                <div class="field"><label for="pPreview">公开目录（每行一项，文件夹以 / 结尾）</label><textarea id="pPreview" rows="5" maxlength="30000" placeholder="课程资料/&#10;课程资料/第一讲.mp4&#10;使用说明.pdf" oninput="markCatalogManual()"></textarea></div>
+                <span class="hint">目录将公开展示，请勿填写链接、提取码或其他私密内容；最多 150 项。上面的提取码只用于读取，不会单独交付；若买家需要，可将 ?pwd=提取码附在交付链接中。</span>
+              </div>
+            </div>
           </div>
 
           <div id="fieldFile" class="hidden">
@@ -450,8 +468,8 @@ async function openRaw(id) {
   if (rawEditor) { rawEditor.dispose(); rawEditor = null; }
   host.innerHTML = '<div class="editor-loading">正在加载编辑器…</div>';
   try {
-    if (!document.getElementById('monacoStyles')) { const link = document.createElement('link'); link.id = 'monacoStyles'; link.rel = 'stylesheet'; link.href = '/vendor/monaco/admin-editor.css?v=20261031-2'; document.head.appendChild(link); }
-    editorModule ||= import('/vendor/monaco/admin-editor.js?v=20261031-2');
+    if (!document.getElementById('monacoStyles')) { const link = document.createElement('link'); link.id = 'monacoStyles'; link.rel = 'stylesheet'; link.href = '/vendor/monaco/admin-editor.css?v=20261031-3'; document.head.appendChild(link); }
+    editorModule ||= import('/vendor/monaco/admin-editor.js?v=20261031-3');
     const { createRawEditor } = await editorModule;
     if (modal.classList.contains('hidden')) return;
     host.innerHTML = ''; rawEditor = createRawEditor(host, value); rawEditor.focus();
@@ -629,6 +647,86 @@ function renderGoods(items) {
       </tr>`;
     }).join('')}</tbody></table>`;
 }
+let catalogSource = 'manual', catalogTruncated = false, lastShareLink = '', catalogSerial = 0, editorSerial = 0, generatedCoverUrl = '';
+let catalogPending = null, activeCatalogRequests = 0;
+function updateProviderHint() {
+  const link = $('#pLink').value.trim();
+  let label = '';
+  try {
+    const u = new URL(link);
+    if (u.protocol === 'https:' && u.hostname === 'pan.quark.cn' && /^\/s\/[A-Za-z0-9_-]+\/?$/.test(u.pathname)) label = '夸克网盘';
+    if (u.protocol === 'https:' && u.hostname === 'pan.baidu.com' && /^\/s\/1[A-Za-z0-9_-]+\/?$/.test(u.pathname)) label = '百度网盘';
+  } catch {}
+  $('#providerHint').textContent = label ? `已识别 ${label} · 保存时自动添加平台标签` : '粘贴夸克或百度网盘公开分享链接';
+  return label;
+}
+function markCatalogManual() {
+  catalogSerial++; catalogPending = null; catalogSource = 'manual'; catalogTruncated = false;
+  $('#catalogStatus').textContent = '手动编辑的目录会在保存商品后公开展示。';
+}
+function onShareLinkChanged() {
+  const link = $('#pLink').value.trim();
+  if (link !== lastShareLink) {
+    lastShareLink = link; catalogSerial++; catalogPending = null;
+    $('#pPreview').value = ''; catalogSource = 'manual'; catalogTruncated = false;
+    $('#catalogStatus').textContent = '链接已变更，旧目录已清空。';
+    if (updateProviderHint()) fetchCatalog($('#readCatalogButton'));
+  }
+}
+function fetchCatalog(button) {
+  const link = $('#pLink').value.trim();
+  if (!updateProviderHint()) { $('#catalogStatus').textContent = '请先填写受支持的夸克或百度分享链接，也可手动填写目录。'; return Promise.resolve(); }
+  const serial = ++catalogSerial, editor = editorSerial, control = button || $('#readCatalogButton');
+  $('#catalogStatus').textContent = '正在尝试读取公开目录…';
+  activeCatalogRequests++; control.disabled = true; control.classList.add('is-loading'); control.setAttribute('aria-busy', 'true');
+  // New links may start a new request while an old one is still in flight.
+  // Serial fencing prevents either a stale response or a late response from
+  // overwriting a manually edited catalog.
+  const operation = (async () => {
+    try {
+      const data = await api('/api/admin/netdisk/preview', { method: 'POST', body: JSON.stringify({ url: link, passcode: $('#pShareCode').value }) });
+      if (serial !== catalogSerial || editor !== editorSerial || $('#pLink').value.trim() !== link) return;
+      if (!data.items?.length) { $('#catalogStatus').textContent = '未读取到文件；可检查分享或手动填写目录。'; return; }
+      $('#pPreview').value = data.items.join('\n');
+      catalogSource = data.provider?.id || 'manual'; catalogTruncated = Boolean(data.truncated);
+      $('#catalogStatus').textContent = `已读取 ${data.items.length} 项${data.truncated ? '（仅部分目录）' : ''}。请检查后保存商品。`;
+    } catch (error) {
+      if (serial === catalogSerial && editor === editorSerial) $('#catalogStatus').textContent = error.message + ' 可手动填写。';
+    } finally {
+      activeCatalogRequests--;
+      if (!activeCatalogRequests) { control.disabled = false; control.classList.remove('is-loading'); control.removeAttribute('aria-busy'); }
+    }
+  })();
+  catalogPending = operation;
+  operation.then(() => { if (catalogPending === operation) catalogPending = null; });
+  return operation;
+}
+async function generateCover(button) {
+  const prompt = $('#pCoverPrompt').value.trim();
+  if (prompt.length < 3) { toast('请先填写封面描述'); return; }
+  if (!confirm('即将调用 Cloudflare Workers AI 生成一张封面。免费额度为账户共享，付费计划超额可能收费。确定继续？')) return;
+  const editor = editorSerial;
+  return withBusy(button, async () => {
+    try {
+      const data = await api('/api/admin/covers/generate', { method: 'POST', body: JSON.stringify({ prompt }) });
+      if (editor !== editorSerial) { toast('封面已生成，但商品编辑已切换'); return; }
+      generatedCoverUrl = data.url;
+      $('#generatedCoverImage').src = data.url;
+      $('#generatedCover').classList.remove('hidden');
+      toast('封面已生成，请预览并确认使用');
+    } catch (error) { toast(error.message); }
+  });
+}
+function applyGeneratedCover() {
+  if (!generatedCoverUrl) return;
+  $('#pCover').value = generatedCoverUrl;
+  toast('已填入封面地址，保存商品后生效');
+}
+function resetAssistFields() {
+  editorSerial++; catalogSerial++; catalogPending = null; generatedCoverUrl = '';
+  $('#pShareCode').value = ''; $('#pCoverPrompt').value = '';
+  $('#generatedCover').classList.add('hidden'); $('#generatedCoverImage').removeAttribute('src');
+}
 function syncDeliveryFields() {
   const t = $('#pType').value;
   $('#fieldText').classList.toggle('hidden', t !== 'TEXT');
@@ -636,17 +734,20 @@ function syncDeliveryFields() {
   $('#fieldFile').classList.toggle('hidden', t !== 'FILE');
 }
 function newGoods() {
+  resetAssistFields(); lastShareLink = ''; catalogSource = 'manual'; catalogTruncated = false;
+  $('#pPreview').value = ''; $('#catalogStatus').textContent = '链接变更后会尝试自动读取；受登录、风控限制时可手动填写。';
   $('#editorTitle').textContent = '上架新商品';
   ['pId', 'pTitle', 'pSummary', 'pDesc', 'pCover', 'pText', 'pLink', 'pFileKey', 'pFileName', 'pStock', 'pTags'].forEach(k => $('#' + k).value = '');
   $('#pPrice').value = ''; $('#pSort').value = '0'; $('#pType').value = 'TEXT'; $('#pStatus').value = 'ACTIVE';
   renderCategoryOptions(); $('#pCategory').value = '';
   $('#pFile').value = '';
-  syncDeliveryFields();
+  updateProviderHint(); syncDeliveryFields();
   $('#goodsEditor').classList.remove('hidden');
   $('#goodsEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function editGoods(id) {
   const p = GOODS[id]; if (!p) return;
+  resetAssistFields();
   $('#editorTitle').textContent = '编辑商品 · ' + p.title;
   $('#pId').value = p.id;
   $('#pTitle').value = p.title || '';
@@ -658,7 +759,11 @@ function editGoods(id) {
   $('#pTags').value = Array.isArray(p.tags) ? p.tags.join(', ') : '';
   $('#pType').value = p.delivery_type || 'TEXT';
   $('#pText').value = p.delivery_text || '';
-  $('#pLink').value = p.delivery_url || '';
+  $('#pLink').value = p.delivery_url || ''; lastShareLink = $('#pLink').value.trim();
+  $('#pPreview').value = Array.isArray(p.preview_files) ? p.preview_files.join('\n') : '';
+  catalogSource = p.preview_source || 'manual'; catalogTruncated = Boolean(p.preview_truncated);
+  $('#catalogStatus').textContent = $('#pPreview').value ? `已保存的目录${catalogTruncated ? '（仅部分）' : ''}；可刷新或手动编辑。` : '暂无目录，可读取或手动填写。';
+  updateProviderHint();
   $('#pFileKey').value = p.file_key || '';
   $('#pFileName').value = p.file_name || '';
   $('#pStock').value = (p.stock === null || p.stock === undefined) ? '' : p.stock;
@@ -668,7 +773,7 @@ function editGoods(id) {
   $('#goodsEditor').classList.remove('hidden');
   $('#goodsEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-function cancelEdit() { $('#goodsEditor').classList.add('hidden'); }
+function cancelEdit() { resetAssistFields(); $('#goodsEditor').classList.add('hidden'); }
 async function uploadFile(input) {
   const file = input.files && input.files[0];
   if (!file) return;
@@ -687,6 +792,10 @@ async function uploadFile(input) {
 }
 async function saveGoods(button) {
   return withBusy(button, async () => {
+  const editor = editorSerial;
+  if ($('#pType').value === 'LINK' && $('#pLink').value.trim() !== lastShareLink) onShareLinkChanged();
+  if (catalogPending) await catalogPending;
+  if (editor !== editorSerial) return;
   const payload = {
     title: $('#pTitle').value,
     summary: $('#pSummary').value,
@@ -698,6 +807,9 @@ async function saveGoods(button) {
     delivery_type: $('#pType').value,
     delivery_text: $('#pText').value,
     delivery_url: $('#pLink').value,
+    preview_files: $('#pPreview').value,
+    preview_source: catalogSource,
+    preview_truncated: catalogTruncated,
     file_key: $('#pFileKey').value,
     file_name: $('#pFileName').value,
     stock: $('#pStock').value === '' ? null : Number($('#pStock').value),

@@ -13,7 +13,7 @@ const sqliteTest = (name, fn) => test(name, { skip: !DatabaseSync && 'requires N
 
 async function makeDb() {
   const raw = new DatabaseSync(':memory:');
-  for (const name of ['0001_init.sql', '0002_users_and_admin.sql', '0003_products_and_orders.sql', '0004_user_admin_roles.sql', '0005_categories_and_tags.sql', '0006_bonus_points.sql']) {
+  for (const name of ['0001_init.sql', '0002_users_and_admin.sql', '0003_products_and_orders.sql', '0004_user_admin_roles.sql', '0005_categories_and_tags.sql', '0006_bonus_points.sql', '0007_catalog_agent.sql']) {
     raw.exec(await readFile(new URL('../migrations/' + name, import.meta.url), 'utf8'));
   }
   raw.exec(`INSERT INTO users(id,email,password_hash,created_at,role) VALUES
@@ -287,4 +287,110 @@ sqliteTest('adjustment bounds include outstanding bonus reservations so a refund
   assert.equal(await refundOrder(env, 'max-order', 'test'), true);
   assert.equal(await bonusBalance(env, 'usr_user'), 1_000_000_000);
   DB.raw.close();
+});
+
+class FakeBucket {
+  objects = new Map();
+  async put(key, data, options = {}) {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    this.objects.set(key, { bytes, ...options });
+  }
+  async head(key) {
+    const object = this.objects.get(key);
+    return object ? { size: object.bytes.length, customMetadata: object.customMetadata } : null;
+  }
+  async get(key) {
+    const object = this.objects.get(key);
+    return object ? { size: object.bytes.length, body: new Response(object.bytes).body } : null;
+  }
+}
+
+sqliteTest('reviewed directory and platform tags are public but delivery credentials never are', async t => {
+  const DB = await makeDb(), env = { DB };
+  t.after(() => DB.raw.close());
+  const body = { title: '资料合集', price_points: 12, delivery_type: 'LINK', delivery_url: 'https://pan.quark.cn/s/paidSecret?pwd=ABC9', tags: '设计,教程', preview_files: '合集/\n合集/课程.mp4', preview_source: 'quark', preview_truncated: true };
+  const created = await worker.fetch(request('/api/admin/products', { admin: true, method: 'POST', body }), env);
+  assert.equal(created.status, 201); const pid = (await created.json()).product.id;
+  let publicResponse = await worker.fetch(request('/api/products?tag=设计&tag=夸克网盘'), env);
+  assert.equal(publicResponse.status, 200);
+  let json = await publicResponse.json();
+  assert.equal(json.items.length, 1);
+  assert.deepEqual(json.items[0].tags, ['夸克网盘', '设计', '教程']);
+  assert.deepEqual(json.items[0].preview_files, ['合集/', '合集/课程.mp4']);
+  assert.equal(json.items[0].provider.id, 'quark'); assert.equal(json.items[0].preview_truncated, true);
+  for (const secret of ['paidSecret', 'ABC9', 'delivery_url', 'file_key']) assert.equal(JSON.stringify(json).includes(secret), false);
+  const noMatch = await worker.fetch(request('/api/products?tag=教程&tag=不存在'), env);
+  assert.deepEqual((await noMatch.json()).items, []);
+  const bad = await worker.fetch(request('/api/admin/products', { admin: true, method: 'POST', body: { ...body, preview_files: '提取码: ABC9' } }), env);
+  assert.equal(bad.status, 400);
+  const blocked = await worker.fetch(request('/api/admin/netdisk/preview', { method: 'POST', body: { url: body.delivery_url } }), env);
+  assert.equal(blocked.status, 401);
+  const before = DB.raw.prepare('SELECT preview_updated_at FROM products WHERE id=?').get(pid).preview_updated_at;
+  const updated = await worker.fetch(request('/api/admin/products/' + pid, { admin: true, method: 'PUT', body: { ...body, status: 'HIDDEN', preview_files: ['合集/', '合集/课程.mp4'] } }), env);
+  assert.equal(updated.status, 200);
+  assert.equal(DB.raw.prepare('SELECT preview_updated_at FROM products WHERE id=?').get(pid).preview_updated_at, before);
+  // Old clients omit snapshot data; changing the share must not retain old names.
+  const { preview_files, preview_source, preview_truncated, ...oldClient } = body;
+  const changed = await worker.fetch(request('/api/admin/products/' + pid, { admin: true, method: 'PUT', body: { ...oldClient, delivery_url: 'https://pan.baidu.com/s/1newPrivate' } }), env);
+  assert.equal(changed.status, 200);
+  publicResponse = await worker.fetch(request('/api/products?tag=百度网盘'), env);
+  json = await publicResponse.json();
+  assert.equal(json.items[0].provider.id, 'baidu'); assert.deepEqual(json.items[0].preview_files, []);
+  assert.ok(!json.items[0].tags.includes('夸克网盘'));
+  // Switching delivery type must not leave an old netdisk snapshot publicly visible.
+  const switched = await worker.fetch(request('/api/admin/products/' + pid, { admin: true, method: 'PUT', body: { ...body, delivery_type: 'TEXT', delivery_text: '私密交付文本' } }), env);
+  assert.equal(switched.status, 200);
+  const textProduct = (await (await worker.fetch(request('/api/products'), env)).json()).items.find(p => p.id === pid);
+  assert.deepEqual(textProduct.preview_files, []); assert.equal(textProduct.provider, null);
+});
+
+sqliteTest('agent tokens can only upload files and create idempotent hidden drafts', async t => {
+  const DB = await makeDb(), BUCKET = new FakeBucket(), secret = '0123456789abcdef0123456789abcdef';
+  const env = { DB, BUCKET, AGENT_API_TOKEN: secret }; t.after(() => DB.raw.close());
+  const agentRequest = (path, body, token = secret) => new Request('https://example.test' + path, {
+    method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', {}, 'bad'), env)).status, 401);
+  assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', {}), { DB, BUCKET })).status, 503);
+  assert.equal((await worker.fetch(agentRequest('/api/admin/products', {}), env)).status, 401);
+  const form = new FormData(); form.append('file', new Blob(['hello file'], { type: 'text/plain' }), '课程.txt');
+  const uploaded = await worker.fetch(new Request('https://example.test/api/agent/uploads', { method: 'POST', headers: { authorization: 'Bearer ' + secret }, body: form }), env);
+  assert.equal(uploaded.status, 200); const file = await uploaded.json();
+  assert.match(file.key, /^agent\//); assert.equal(file.size, 10);
+  const payload = { idempotency_key: 'agent-job-001', title: 'Agent 创作', price_points: 20, file_key: file.key, file_name: file.name, tags: ['模板'], status: 'ACTIVE' };
+  const [first, second] = await Promise.all([
+    worker.fetch(agentRequest('/api/agent/drafts', payload), env),
+    worker.fetch(agentRequest('/api/agent/drafts', payload), env),
+  ]);
+  assert.deepEqual([first.status, second.status].sort(), [200, 201]);
+  const [a, b] = await Promise.all([first.json(), second.json()]);
+  assert.equal(a.product.id, b.product.id); assert.equal(a.product.status, 'HIDDEN');
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) n FROM products WHERE title='Agent 创作'").get().n, 1);
+  assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', { ...payload, title: '不同内容' }), env)).status, 409);
+  assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', { ...payload, idempotency_key: 'agent-job-002', file_key: 'goods/private.zip' }), env)).status, 400);
+  const publicJson = await (await worker.fetch(request('/api/products'), env)).text();
+  assert.equal(publicJson.includes('Agent 创作'), false); assert.equal(publicJson.includes(file.key), false);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) n FROM admin_audit WHERE action='agent.draft_created'").get().n, 1);
+  DB.raw.prepare('DELETE FROM products WHERE id=?').run(a.product.id);
+  assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', payload), env)).status, 410);
+});
+
+sqliteTest('AI covers require an admin, use the explicit model and only expose generated images', async t => {
+  const DB = await makeDb(), BUCKET = new FakeBucket(); t.after(() => DB.raw.close());
+  let calls = 0, args;
+  const env = { DB, BUCKET, AI: { async run(...values) { calls++; args = values; return { image: btoa('\xff\xd8\xff\xe0test') }; } } };
+  const body = { prompt: 'a lilac digital goods cover' };
+  assert.equal((await worker.fetch(request('/api/admin/covers/generate', { method: 'POST', body }), env)).status, 401);
+  assert.equal(calls, 0);
+  const generated = await worker.fetch(request('/api/admin/covers/generate', { admin: true, method: 'POST', body }), env);
+  assert.equal(generated.status, 201); const result = await generated.json();
+  assert.equal(calls, 1); assert.equal(args[0], '@cf/black-forest-labs/flux-1-schnell'); assert.equal(args[1].steps, 4);
+  const image = await worker.fetch(request(result.url), env);
+  assert.equal(image.status, 200); assert.equal(image.headers.get('content-type'), 'image/jpeg');
+  assert.match(image.headers.get('cache-control'), /immutable/);
+  assert.equal((await image.arrayBuffer()).byteLength, 8);
+  assert.equal((await worker.fetch(request('/api/covers/../../goods/private'), env)).status, 404);
+  assert.equal((await worker.fetch(request('/api/admin/covers/generate', { admin: true, method: 'POST', body }), { DB, BUCKET })).status, 503);
+  const audit = DB.raw.prepare("SELECT detail FROM admin_audit WHERE action='goods.cover_generated'").get();
+  assert.equal(String(audit.detail).includes(body.prompt), false);
 });
