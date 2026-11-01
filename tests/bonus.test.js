@@ -427,7 +427,7 @@ sqliteTest('admin preview consumes a mocked Skill-style root and child without l
   const calls = [];
   globalThis.fetch = async (url, options) => {
     const parsed = new URL(url); calls.push(parsed.pathname);
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     assert.equal(options.headers.cookie, undefined);
     if (parsed.pathname.endsWith('/v2/detail')) {
       assert.equal(JSON.parse(options.body).passcode, 'A1b2');

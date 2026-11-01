@@ -100,6 +100,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .nav-icon svg { display: block; width: 19px; height: 19px; flex: none; }
 @media (max-width: 760px) { .series-terms, .series-manager { padding: 15px; }.series-update-row { flex-wrap: wrap; }.series-update-row .row-actions { width: 100%; }.agent-steps { grid-template-columns: 1fr; }.agent-steps > div { padding: 11px; } }
 .checkline { display: inline-flex !important; align-items: center; gap: 7px; margin-top: 5px; color: #80758f; font-size: 11px; font-weight: 600; }.checkline input[type=checkbox] { width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: #7259c7; }
+.catalog-progress { height: 7px; margin: 13px 0 8px; overflow: hidden; border-radius: 99px; background: #f0ebf8; box-shadow: inset 0 1px 2px rgba(47,38,76,.06); }
+.catalog-progress > i { display: block; width: 0; height: 100%; border-radius: 99px; background: linear-gradient(90deg,#7c62d6,#a68bec); transition: width .3s cubic-bezier(.2,.8,.2,1); }
 
 /* Scoped styling for the Agent pairing controls. */
 .pair-card { margin: 20px 0 26px; padding: 22px; border: 1px solid #e7def6; border-radius: 15px; background: linear-gradient(135deg, #fcfaff, #f7f3ff); }

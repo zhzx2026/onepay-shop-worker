@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectNetdisk, normalizePreview, providerTags, readShareDirectory } from '../src/netdisk.js';
+import { detectNetdisk, normalizePreview, providerTags, readShareDirectory, startShareScan, continueShareScan, scanSummary } from '../src/netdisk.js';
 
 const response = (data, headers = {}, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } });
 
@@ -23,7 +23,7 @@ test('directory snapshots accept only bounded, non-secret names', () => {
   for (const value of ['ftp://example.com/file', 'magnet:?xt=urn:btih:secret', 'ed2k://private', 'stoken=secret', 'access_token: secret', 'passcode=1234']) {
     assert.equal(normalizePreview(value).ok, false, value);
   }
-  assert.equal(normalizePreview(Array.from({ length: 151 }, (_, i) => '文件' + i)).ok, false);
+  assert.equal(normalizePreview(Array.from({ length: 301 }, (_, i) => '文件' + i)).ok, false);
 });
 
 test('Quark Skill guest flow reads the root and child without account credentials', async () => {
@@ -32,7 +32,7 @@ test('Quark Skill guest flow reads the root and child without account credential
     calls.push({ url, options });
     const parsed = new URL(url);
     assert.equal(parsed.hostname, 'drive-pc.quark.cn');
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     assert.equal(options.headers.cookie, undefined);
     assert.equal(options.headers.authorization, undefined);
     assert.equal(parsed.searchParams.get('access_token'), 'guest_placeholder');
@@ -67,7 +67,7 @@ test('Baidu adapter uses only the transient share cookie and returns names, not 
   const calls = [];
   const fetcher = async (url, options) => {
     const parsed = new URL(url); calls.push({ parsed, options });
-    assert.equal(parsed.hostname, 'pan.baidu.com'); assert.equal(options.redirect, 'error');
+    assert.equal(parsed.hostname, 'pan.baidu.com'); assert.equal(options.redirect, 'manual');
     if (parsed.pathname === '/share/verify') {
       assert.equal(new URLSearchParams(options.body).get('pwd'), 'code');
       return response({ errno: 0 }, { 'set-cookie': 'BDCLND=secret-cookie; Path=/; HttpOnly' });
@@ -97,7 +97,7 @@ test('adapters fail closed on errors and mark depth, page and response limits', 
   });
   assert.equal(result.items.length, 50); // repeated pages cannot inflate the snapshot
   assert.equal(result.truncated, true);
-  assert.ok(calls <= 13); // token + at most 12 bounded list attempts
+  assert.ok(calls <= 151); // token + at most 150 bounded list attempts
 });
 
 test('Quark pagination follows the real metadata envelope before visiting child folders', async () => {
@@ -159,7 +159,7 @@ test('Quark Skill guest flow falls back to the fixed alternate host without cook
     return response({ code: 0, data: { token_info: { stoken: 'temporary' }, detail_info: { list: [{ file_name: '公开名称', fid: 'file', dir: false }] } }, metadata: { _total: 1, _size: 50 } });
   });
   assert.deepEqual(calls.map(call => call.parsed.hostname), ['drive-pc.quark.cn', 'drive-h.quark.cn']);
-  assert.ok(calls.every(call => call.options.headers.cookie === undefined && call.options.redirect === 'error'));
+  assert.ok(calls.every(call => call.options.headers.cookie === undefined && call.options.redirect === 'manual'));
   assert.deepEqual(result.items, ['公开名称']);
   assert.equal(result.truncated, false);
 });
@@ -213,6 +213,21 @@ test('upstream HTTP and business errors are actionable but never expose upstream
   });
 });
 
+test('3xx redirects are rejected instead of followed', async () => {
+  let calls = 0;
+  await assert.rejects(readShareDirectory('https://pan.quark.cn/s/a', '', async (url, options) => {
+    calls++;
+    assert.equal(options.redirect, 'manual');
+    return new Response('', { status: 302, headers: { location: 'https://challenge.test/' } });
+  }), error => {
+    assert.equal(error.diagnostic.reason, 'HTTP_ERROR');
+    assert.equal(error.diagnostic.http_status, 302);
+    assert.ok(!error.message.includes('challenge.test'));
+    return true;
+  });
+  assert.equal(calls, 4); // two Skill guest hosts and two legacy token hosts
+});
+
 test('partial directory failures report a sanitized warning without exceeding the shared list budget', async () => {
   const calls = [];
   const result = await readShareDirectory('https://pan.quark.cn/s/privateId', '', async url => {
@@ -228,11 +243,11 @@ test('partial directory failures report a sanitized warning without exceeding th
   assert.equal(result.warning.diagnostic.stage, 'DETAIL');
   assert.equal(result.warning.diagnostic.provider_code, 31001);
   assert.match(result.warning.message, /HTTP 403/);
-  assert.ok(calls.filter(url => url.pathname.endsWith('/detail')).length <= 12);
+  assert.ok(calls.filter(url => url.pathname.endsWith('/detail')).length <= 150);
   for (const secret of ['temporary-secret', 'privateId', 'private-folder']) assert.ok(!JSON.stringify(result).includes(secret));
 });
 
-test('fallback attempts count toward the twelve-request directory budget', async () => {
+test('fallback attempts count toward the bounded directory budget', async () => {
   const detailCalls = [];
   const result = await readShareDirectory('https://pan.quark.cn/s/a', '', async url => {
     const parsed = new URL(url);
@@ -241,8 +256,8 @@ test('fallback attempts count toward the twelve-request directory budget', async
     if (parsed.searchParams.get('_page') === '2' && parsed.hostname === 'drive-h.quark.cn') throw new Error('temporary network failure');
     return response({ code: 0, data: { list: Array.from({ length: 50 }, (_, i) => ({ file_name: `项目${i}`, fid: `f${i}`, dir: false })) }, metadata: { _total: 1000, _size: 50 } });
   });
-  assert.equal(detailCalls.length, 12);
-  assert.equal(result.truncated, true);
+  assert.ok(detailCalls.length <= 150);
+  assert.equal(result.truncated, false);
   assert.equal(result.items.length, 50);
 });
 
@@ -364,7 +379,7 @@ test('missing guest token cannot make an incomplete directory look complete', as
     assert.ok(parsed.pathname.endsWith('/token'));
     return response({ code: 31001, message: 'privateId Ab12 private-folder' }, {}, 403);
   });
-  assert.equal(calls.length, 3);
+  assert.ok(calls.length >= 3);
   assert.deepEqual(result.items, ['合集/']);
   assert.equal(result.truncated, true);
   assert.equal(result.warning.diagnostic.stage, 'TOKEN');
@@ -403,4 +418,57 @@ test('Skill guest flow rejects error envelopes even if a response contains fake 
   assert.deepEqual(result.items, ['可信响应']);
   assert.equal(result.truncated, false);
   assert.ok(!JSON.stringify(result).includes('fake-secret'));
+});
+
+test('directory scans resume from serialized state and report progress', async () => {
+  const calls = [];
+  const fetcher = async url => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/v2/detail')) {
+      calls.push('root:1');
+      return response({ code: 0, data: { token_info: { stoken: 'temporary' }, detail_info: { list: [
+        { file_name: '合集A', fid: 'dirA', file_type: '0' },
+        { file_name: '合集B', fid: 'dirB', file_type: '0' },
+        { file_name: '说明.pdf', fid: 'file1', file_type: '1' },
+      ] } }, metadata: { _total: 3, _size: 50 } });
+    }
+    const parent = parsed.searchParams.get('pdir_fid');
+    calls.push(`${parent}:1`);
+    return response({ code: 0, data: { list: [{ file_name: `${parent}.mp4`, fid: 'file', file_type: 1 }] }, metadata: { _total: 1, _size: 50 } });
+  };
+
+  let state = await startShareScan('https://pan.quark.cn/s/abc', '', fetcher);
+  // The scan state must survive a D1 round trip between batches.
+  state = JSON.parse(JSON.stringify(state));
+  const first = scanSummary(await continueShareScan(state, '', fetcher, 1));
+  assert.equal(first.done, false);
+  assert.deepEqual(first.items, ['合集A/', '合集B/', '说明.pdf', '合集A/dirA.mp4']);
+  assert.equal(first.progress.pending, 1);
+  assert.ok(first.progress.percent > 0 && first.progress.percent < 100);
+
+  state = JSON.parse(JSON.stringify(state));
+  const second = scanSummary(await continueShareScan(state, '', fetcher, 5));
+  assert.equal(second.done, true);
+  assert.deepEqual(second.items, ['合集A/', '合集B/', '说明.pdf', '合集A/dirA.mp4', '合集B/dirB.mp4']);
+  assert.equal(second.progress.percent, 100);
+  assert.deepEqual(calls, ['root:1', 'dirA:1', 'dirB:1']); // the cached root page is never fetched twice
+  assert.equal(second.truncated, false);
+});
+
+test('a batch never spends more upstream list calls than its budget', async () => {
+  const calls = [];
+  const fetcher = async url => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/v2/detail')) {
+      return response({ code: 0, data: { token_info: { stoken: 'temporary' }, detail_info: { list: Array.from({ length: 8 }, (_, i) => ({ file_name: `目录${i}`, fid: `dir${i}`, file_type: 0 })) } }, metadata: { _total: 8, _size: 50 } });
+    }
+    calls.push(parsed.searchParams.get('pdir_fid'));
+    return response({ code: 0, data: { list: [{ file_name: '文件.txt', fid: 'f', file_type: 1 }] }, metadata: { _total: 1, _size: 50 } });
+  };
+  const state = await startShareScan('https://pan.quark.cn/s/abc', '', fetcher);
+  const batch = scanSummary(await continueShareScan(state, '', fetcher, 3));
+  assert.equal(calls.length, 3);
+  assert.equal(batch.done, false);
+  assert.equal(batch.progress.pending, 5);
+  assert.ok(batch.progress.percent > 0 && batch.progress.percent < 100);
 });

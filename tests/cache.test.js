@@ -463,3 +463,19 @@ test('repeated tag filters have distinct, order-independent public cache keys', 
   assert.equal(other.headers.get('x-cache'), 'MISS');
   assert.equal(calls, 3);
 });
+
+test('plain HTTP requests are redirected to HTTPS so Secure session cookies are kept', async () => {
+  const get = await worker.fetch(new Request('http://shop.example.test/account?tab=orders'));
+  assert.equal(get.status, 301);
+  assert.equal(get.headers.get('location'), 'https://shop.example.test/account?tab=orders');
+
+  const post = await worker.fetch(new Request('http://shop.example.test/api/auth/login', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'a@b.test', password: 'x' }),
+  }));
+  assert.equal(post.status, 308);
+  assert.equal(post.headers.get('location'), 'https://shop.example.test/api/auth/login');
+
+  // Local development stays on HTTP.
+  const local = await worker.fetch(new Request('http://127.0.0.1:8787/api/health'));
+  assert.notEqual(local.status, 301);
+});

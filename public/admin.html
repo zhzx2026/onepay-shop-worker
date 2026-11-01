@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261101-1">
+<link rel="stylesheet" href="/admin.css?v=20261101-2">
 </head>
 <body>
 
@@ -148,10 +148,11 @@
               <div class="assist-heading"><span class="assist-icon">▤</span><span><b>购买前的资源目录</b><small id="providerHint">粘贴网盘链接，尝试自动读取目录</small></span></div>
               <div class="assist-content">
                 <div class="catalog-tools"><div class="field"><label for="pShareCode">提取码（可选，仅用于读取）</label><input id="pShareCode" type="password" maxlength="16" autocomplete="off" placeholder="如分享需要提取码" oninput="onShareCodeChanged()"></div><button type="button" class="btn secondary" id="readCatalogButton" onclick="fetchCatalog(this)">读取网盘目录</button></div>
+                <div class="catalog-progress hidden" id="catalogProgress" role="progressbar" aria-label="目录读取进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="catalogProgressFill"></i></div>
                 <div class="hint" id="catalogStatus" aria-live="polite">链接变更后会尝试自动读取；受登录、风控限制时可手动填写。</div>
                 <div class="field"><label for="pPreview">公开目录（每行一项，文件夹以 / 结尾）</label><textarea id="pPreview" rows="5" maxlength="50000" placeholder="课程资料/&#10;课程资料/第一讲.mp4&#10;使用说明.pdf" oninput="markCatalogManual()"></textarea></div>
                 <label class="checkline"><input id="pCatalogPartial" type="checkbox" onchange="onCatalogPartialChanged()"> 标记为部分目录（尚未列出全部内容）</label>
-                <span class="hint">目录将公开展示，请勿填写链接、提取码或其他私密内容；最多 150 项。上面的提取码只用于读取，不会单独交付；若买家需要，可将 ?pwd=提取码附在交付链接中。</span>
+                <span class="hint">目录将公开展示，请勿填写链接、提取码或其他私密内容；最多 300 项。大目录会分批读取并显示进度。上面的提取码只用于读取，不会单独交付；若买家需要，可将 ?pwd=提取码附在交付链接中。</span>
               </div>
             </div>
           </div>
@@ -721,10 +722,20 @@ function setCatalogBusy(busy) {
   control.classList.toggle('is-loading', busy);
   if (busy) control.setAttribute('aria-busy', 'true'); else control.removeAttribute('aria-busy');
 }
+function setCatalogProgress(percent, text) {
+  if (text) $('#catalogStatus').textContent = text;
+  const bar = $('#catalogProgress'), fill = $('#catalogProgressFill');
+  if (!bar || !fill) return;
+  const value = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  bar.classList.remove('hidden');
+  fill.style.width = value + '%';
+  bar.setAttribute('aria-valuenow', String(value));
+}
+function hideCatalogProgress() { const bar = $('#catalogProgress'); if (bar) bar.classList.add('hidden'); }
 function invalidateCatalogRequest() {
   catalogSerial++; catalogPending = null;
   if (catalogAbort) catalogAbort.abort();
-  catalogAbort = null; setCatalogBusy(false);
+  catalogAbort = null; setCatalogBusy(false); hideCatalogProgress();
 }
 function updateProviderHint() {
   const link = $('#pLink').value.trim();
@@ -773,19 +784,32 @@ function fetchCatalog(button) {
   invalidateCatalogRequest();
   const serial = catalogSerial, editor = editorSerial, controller = new AbortController();
   catalogAbort = controller;
-  $('#catalogStatus').textContent = '正在尝试读取公开目录…';
   setCatalogBusy(true);
+  setCatalogProgress(0, '正在读取公开目录…');
   // Only the latest request can update the form or release its busy state.
   // Changing a link, passcode or manually editing the list invalidates it.
   const operation = (async () => {
     try {
-      const data = await api('/api/admin/netdisk/preview', { method: 'POST', signal: controller.signal, body: JSON.stringify({ url: link, passcode: $('#pShareCode').value }) });
-      if (serial !== catalogSerial || editor !== editorSerial || $('#pLink').value.trim() !== link) return;
-      if (!data.items?.length) { $('#catalogStatus').textContent = '未读取到文件；可检查分享或手动填写目录。'; return; }
-      $('#pPreview').value = data.items.join('\n');
-      catalogSource = data.provider?.id || 'manual'; catalogTruncated = Boolean(data.truncated); $('#pCatalogPartial').checked = catalogTruncated;
-      $('#catalogStatus').textContent = `已读取 ${data.items.length} 项${data.truncated ? '（仅部分目录）' : ''}。${data.warning?.message || '请检查后保存商品。'}`;
+      const passcode = $('#pShareCode').value;
+      let scanId = '', round = 0, percent = 0, data = null;
+      // Large shares are scanned in batches; keep asking for the next batch
+      // until the server reports the directory is complete.
+      for (;;) {
+        data = await api('/api/admin/netdisk/preview', { method: 'POST', signal: controller.signal, body: JSON.stringify({ url: link, passcode, scan_id: scanId }) });
+        if (serial !== catalogSerial || editor !== editorSerial || $('#pLink').value.trim() !== link) return;
+        scanId = data.scan_id || '';
+        percent = Math.max(percent, Number(data.progress?.percent) || 0);
+        const count = data.items?.length || 0;
+        if (count) { $('#pPreview').value = data.items.join('\n'); catalogSource = data.provider?.id || 'manual'; }
+        setCatalogProgress(percent, `正在读取公开目录… 已读取 ${count} 项 · ${percent}%`);
+        if (data.done !== false) break;
+        if (++round >= 40) throw new Error('目录读取批次过多，请稍后重试或手动填写目录。');
+      }
+      if (!data.items?.length) { hideCatalogProgress(); $('#catalogStatus').textContent = '未读取到文件；可检查分享或手动填写目录。'; return; }
+      catalogTruncated = Boolean(data.truncated); $('#pCatalogPartial').checked = catalogTruncated;
+      setCatalogProgress(100, `已读取 ${data.items.length} 项${data.truncated ? '（仅部分目录）' : ''}。${data.warning?.message || '请检查后保存商品。'}`);
     } catch (error) {
+      hideCatalogProgress();
       if (serial === catalogSerial && editor === editorSerial && $('#pLink').value.trim() === link) $('#catalogStatus').textContent = error.message;
     } finally {
       if (serial === catalogSerial && editor === editorSerial) { catalogAbort = null; setCatalogBusy(false); }
@@ -917,6 +941,13 @@ async function saveGoods(button) {
   const series = $('#pKind').value === 'SUBSCRIPTION';
   const days = series && $('#pSubMode').value === 'timed' ? Number($('#pSubDays').value) : 0;
   if (series && $('#pSubMode').value === 'timed' && (!Number.isInteger(days) || days < 1 || days > 3650)) return toast('限时订阅请填写 1–3650 天');
+  const id = $('#pId').value;
+  const existing = id ? GOODS[id] : null;
+  const nextPreview = series ? $('#pSeriesPreview').value : ($('#pType').value === 'LINK' ? $('#pPreview').value : '');
+  const nextCount = nextPreview.split('\n').filter(Boolean).length;
+  const existingCount = Array.isArray(existing?.preview_files) ? existing.preview_files.length : 0;
+  if (!series && existing && catalogTruncated && existingCount > nextCount &&
+      !confirm(`新读取的目录不完整（${nextCount} 项），当前商品已有 ${existingCount} 项。继续保存会用较少内容覆盖，确定吗？`)) return;
   const payload = {
     title: $('#pTitle').value,
     summary: $('#pSummary').value,
@@ -940,7 +971,6 @@ async function saveGoods(button) {
     status: $('#pStatus').value,
     sort_order: Number($('#pSort').value || 0),
   };
-  const id = $('#pId').value;
   try {
     if (id) await api('/api/admin/products/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
     else await api('/api/admin/products', { method: 'POST', body: JSON.stringify(payload) });
