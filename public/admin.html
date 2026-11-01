@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261101-2">
+<link rel="stylesheet" href="/admin.css?v=20261101-3">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     </div>
     <form class="login" onsubmit="login(event)">
       <div class="form-kicker">STORE MANAGEMENT <span>✳</span></div>
-      <h1>欢迎回来</h1>
+      <h2 class="login-title">欢迎回来</h2>
       <p>登录管理后台，继续打理你的商店。</p>
       <div class="field"><label for="adminEmail">管理员邮箱</label><input id="adminEmail" type="email" autocomplete="username" placeholder="name@example.com" required></div>
       <div class="field"><label for="adminPassword">账号密码</label><input id="adminPassword" type="password" autocomplete="current-password" placeholder="输入账号密码" required></div>
@@ -164,7 +164,7 @@
               <span class="hint" id="storageHint">文件上传到 Cloudflare R2，用户通过订单专属链接下载，不公开可枚举。</span>
             </div>
             <div class="cols">
-              <div class="field"><label>已上传文件 key</label><input id="pFileKey" maxlength="512" placeholder="上传后自动填入"></div>
+              <div class="field"><label>已上传文件 key</label><input id="pFileKey" maxlength="512" placeholder="上传后自动填入" readonly></div>
               <div class="field"><label>下载显示名</label><input id="pFileName" maxlength="120" placeholder="例如：模板包.zip"></div>
             </div>
           </div>
@@ -285,7 +285,7 @@
       <div class="panel">
         <div class="panel-title"><h2>用户管理</h2><button class="raw-trigger" data-raw-for="usersOut" onclick="openRaw('usersOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">前台注册的邮箱账号。管理员是账号上的独立角色，与后台会话绑定；密码只以 PBKDF2 哈希存储，后台不可查看，只能重置。变更角色、停用或重置密码会让该用户会话失效；管理员被降权、停用或重置密码时，其签发的 Agent 配对码和令牌也会失效。</p>
-        <div class="actions" style="margin:0 0 12px">
+        <div class="actions toolbar" style="margin:0 0 12px">
           <input id="userQuery" class="searchbox" placeholder="按邮箱搜索" maxlength="64" onkeydown="if(event.key==='Enter')loadUsers(0)">
           <button class="btn" onclick="loadUsers(0)">搜索</button>
           <button class="btn secondary" onclick="$('#userQuery').value='';loadUsers(0)">重置</button>
@@ -393,7 +393,7 @@
     <div class="code-window"><div class="code-toolbar"><span class="code-dots"><i></i><i></i><i></i></span><span>response.json</span><span class="code-readonly">只读</span></div><div id="rawEditor" class="raw-editor" aria-label="原始 JSON 数据"></div></div>
   </div>
 </div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -1041,7 +1041,11 @@ function renderUsers(d) {
         ? '<button class="rowbtn" disabled title="不能停用当前登录的管理员账号">停用（当前账号）</button>'
         : `<button class="rowbtn" onclick="toggleUser('${u.id}',${u.disabled ? 0 : 1})">${u.disabled ? '启用' : '停用'}</button>`}
       <button class="rowbtn danger" onclick="deleteUser('${u.id}')">删除</button></td>
-  </tr>`).join('')}</tbody></table>`;
+  </tr>`).join('')}</tbody></table>${d.total > 20 ? `<div class="actions" style="margin-top:12px">
+    <button class="btn secondary" onclick="loadUsers(Math.max(0, userOffset - 20))" ${userOffset <= 0 ? 'disabled' : ''}>上一页</button>
+    <span class="mono">第 ${Math.floor(userOffset / 20) + 1} / ${Math.ceil(d.total / 20)} 页</span>
+    <button class="btn secondary" onclick="loadUsers(userOffset + 20)" ${userOffset + d.items.length >= d.total ? 'disabled' : ''}>下一页</button>
+  </div>` : ''}`;
 }
 let bonusTarget = null, bonusPending = null;
 async function openBonus(id) {

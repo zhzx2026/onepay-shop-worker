@@ -26,3 +26,7 @@ SITE_DESCRIPTION = "支付宝安全充值积分 · 积分兑换数字商品"
 COOKIE_NAME = "onepay_session"
 ADMIN_COOKIE_NAME = "onepay_admin_session"
 SESSION_DAYS = "14"
+
+# 卡单回收：每 5 分钟扫一次超过 10 分钟仍未收敛的 PENDING 订单（src/reaper.js）。
+[triggers]
+crons = ["*/5 * * * *"]

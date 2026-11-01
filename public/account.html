@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>个人中心 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -180,7 +180,7 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-1"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
 let me = null, points = null, authMode = 'login';
@@ -321,11 +321,13 @@ async function buyPoints(sku, button) {
         method: 'POST',
         body: JSON.stringify({ idempotency_key: 'buy-' + crypto.randomUUID(), sku_id: sku })
       });
-      if (data.status === 'READY' && data.purchase_url) {
+      const safePayUrl = u => { try { const x = new URL(String(u || '')); return (x.protocol === 'https:' || x.protocol === 'http:') ? x.href : ''; } catch { return ''; } };
+      const payHref = safePayUrl(data.purchase_url), qrHref = safePayUrl(data.purchase_qr_code);
+      if (data.status === 'READY' && payHref) {
         $('#payDetails').innerHTML = `<div><b>${esc(data.charging_option?.display_name || '积分充值')}</b></div>
-          <div style="margin-top:6px;color:#6e7971">入口有效期：${esc(data.expire_time || '以支付宝页面为准')}</div>
-          <p style="margin:10px 0 0"><a href="${esc(data.purchase_url)}" target="_blank" rel="noopener">打开支付宝继续付款 →</a></p>
-          ${data.purchase_qr_code ? `<div style="margin-top:6px;color:#6e7971">二维码：<a href="${esc(data.purchase_qr_code)}" target="_blank" rel="noopener">打开二维码</a></div>` : ''}`;
+          <div style="margin-top:6px">入口有效期：${esc(data.expire_time || '以支付宝页面为准')}</div>
+          <p style="margin:10px 0 0"><a href="${esc(payHref)}" target="_blank" rel="noopener noreferrer">打开支付宝继续付款 →</a></p>
+          ${qrHref ? `<div style="margin-top:6px">二维码：<a href="${esc(qrHref)}" target="_blank" rel="noopener noreferrer">打开二维码</a></div>` : ''}`;
       } else {
         $('#payDetails').textContent = data.message || `购买状态：${data.status || '待确认'}，请勿重复创建购买请求。`;
       }
@@ -395,7 +397,7 @@ async function loadSubscriptions(button) {
       else $('#subscriptionList').innerHTML = subscriptions.map(sub => {
         const active = subActive(sub), status = sub.permanent ? '永久有效' : active ? '订阅有效' : '已到期';
         const until = sub.permanent ? '永久查看系列更新' : (active ? '有效期至 ' : '已于 ') + fmtTime(sub.expires_at) + (active ? '' : ' 到期');
-        const renew = sub.status === 'ACTIVE' && !sub.permanent ? `<a class="sbtn sm" href="/shop?q=${encodeURIComponent(sub.title)}">${active ? '手动续订' : '重新订阅'} ↗</a>` : '';
+        const renew = sub.status === 'ACTIVE' && !sub.permanent ? `<a class="sbtn sm" href="/shop?product=${encodeURIComponent(sub.product_id)}">${active ? '手动续订' : '重新订阅'} ↗</a>` : '';
         return `<article class="subscription-card"><div class="subscription-icon" aria-hidden="true">↻</div><div class="subscription-content"><div class="collection-heading"><div><span class="collection-type">SERIES COLLECTION</span><h4>${esc(sub.title)}</h4></div><span class="status-pill ${active ? 'ok' : 'bad'}">${status}</span></div><p>${esc(until)}</p><div class="subscription-actions">${active ? `<button class="sbtn sm primary" data-open-series="${esc(sub.product_id)}">查看系列更新 ↗</button>` : '<span class="subscription-expired">续订后可继续查看历史及新增更新</span>'}${renew}${sub.status !== 'ACTIVE' && !sub.permanent ? '<span class="subscription-expired">商品已下架，暂无法续订</span>' : ''}</div></div></article>`;
       }).join('');
       if (requestedProduct) {

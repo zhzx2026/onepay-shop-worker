@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    name: Syntax & Full Test Suite (Node 22 + node:sqlite)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify migration numbering uniqueness
+        run: |
+          dups=$(ls migrations/*.sql | sed -E 's#.*/([0-9]+)_.*#\1#' | sort | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "Duplicate migration prefix detected: $dups" >&2
+            exit 1
+          fi
+
+      - name: Syntax check all Worker & Storefront modules
+        run: npm run check
+
+      - name: Run full unit & D1 SQLite transaction tests
+        run: npm test
