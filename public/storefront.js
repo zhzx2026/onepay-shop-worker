@@ -21,6 +21,10 @@
       node = document.createElement('div');
       node.id = 'toast';
       node.className = 'toast';
+      // 读屏用户必须收到「已复制 / 积分不足 / 扣减待确认」这类反馈。
+      node.setAttribute('role', 'status');
+      node.setAttribute('aria-live', 'polite');
+      node.setAttribute('aria-atomic', 'true');
       document.body.appendChild(node);
     }
     node.textContent = message;
@@ -62,6 +66,11 @@
       if (modal._lastFocus?.isConnected) modal._lastFocus.focus({ preventScroll: true });
     }
   }
+
+  document.addEventListener('click', event => {
+    const modal = event.target.classList?.contains('modal') && event.target.classList.contains('show') ? event.target : null;
+    if (modal) setModal(modal, false);
+  });
 
   document.addEventListener('keydown', event => {
     const open = $$('.modal.show');
@@ -107,9 +116,13 @@
   }
 
   function categoryIds(id, categories) {
+    const visible = (categories || []).filter(item => item.status !== 'HIDDEN');
+    if ((categories || []).some(item => item.id === id && item.status === 'HIDDEN')) return [];
+    const root = visible.find(item => item.id === id);
+    if (root?.parent_id && !visible.some(item => item.id === root.parent_id)) return [];
     const ids = [id];
     for (let i = 0; i < ids.length; i++) {
-      categories.filter(item => item.parent_id === ids[i]).forEach(item => {
+      visible.filter(item => item.parent_id === ids[i]).forEach(item => {
         if (!ids.includes(item.id)) ids.push(item.id);
       });
     }

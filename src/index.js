@@ -2,6 +2,7 @@ import { cachedPublicJson, invalidatePublicCache, withStaticCache, productTagFil
 import { detectNetdisk, providerTags, normalizePreview, sharePasscode, startShareScan, continueShareScan, scanSummary, SCAN_BATCH_CALLS } from './netdisk.js';
 import { bonusBalance, bonusHistory, adjustBonus, reserveOrder, refundOrder } from './bonus.js';
 import { SUBSCRIPTION_FREQUENCIES, validSubscriptionDays, isSubscriptionActive, finalizeSubscriptionOrder, subscriptionFor, subscriptionView, parseSubscriptionUpdate, subscriberUpdateView } from './subscriptions.js';
+import { runMaintenance, reapPendingOrders } from './reaper.js';
 import { pairingSchemaReady, issuePairCode, cancelPairCodes, pairCodeStatus, recordPairAttempt, exchangePairCode, validPairedAgent, listAgentTokens, revokeAgentToken } from './agent.js';
 
 const API = 'https://ai6666.com/opcpay/api/pay/v1';
@@ -17,8 +18,14 @@ const CATEGORY_STATUS = new Set(['ACTIVE', 'HIDDEN']);
 const MAX_PRODUCT_TAGS = 8;
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
+const DUMMY_PASSWORD_HASH = '100000.dGltW5nLXNhbHQtZHVtbXk.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+const SECURITY_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+};
 function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', ...headers } });
+  return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store', ...SECURITY_HEADERS, ...headers } });
 }
 function fail(status, error, code = 'REQUEST_FAILED') { return json({ error, error_code: code }, status); }
 function now() { return new Date().toISOString(); }
@@ -47,18 +54,19 @@ async function passwordMatches(password, saved) {
 // SameSite=Lax still blocks cross-site form POSTs, but unlike Strict it keeps
 // the session when a user arrives from an external link, a QR code or an
 // in-app browser that treats the first navigation as cross-site.
-function cookie(name, value, maxAge) { return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`; }
+function cookie(name, value, maxAge, request = null) {
+  const isHttpLocal = request && (() => { try { const u = new URL(request.url); return u.protocol === 'http:' && LOCAL_HOSTS.has(u.hostname); } catch { return false; } })();
+  return `${name}=${value}; Path=/; HttpOnly;${isHttpLocal ? '' : ' Secure;'} SameSite=Lax; Max-Age=${maxAge}`;
+}
 function getCookie(request, name) {
   const raw = request.headers.get('Cookie') || '';
   for (const part of raw.split(';')) { const [k, ...v] = part.trim().split('='); if (k === name) return v.join('='); }
   return '';
 }
 async function bodyJson(request, max = 65536) {
-  const text = await request.text();
-  if (text.length > max) throw new Error('BODY_TOO_LARGE');
-  const data = JSON.parse(text || '{}');
-  if (!data || Array.isArray(data) || typeof data !== 'object') throw new Error('INVALID_JSON');
-  return data;
+  const ct = (request.headers.get('content-type') || '').toLowerCase();
+  if (ct && !ct.includes('application/json')) throw Object.assign(new Error('需要 application/json 请求头'), { status: 415, code: 'UNSUPPORTED_MEDIA_TYPE' });
+  return smallBodyJson(request, max);
 }
 // Public pairing accepts only tiny JSON. Bound the stream before buffering it,
 // including chunked requests that omit or lie about Content-Length.
@@ -87,8 +95,44 @@ function validText(v, min, max) { return typeof v === 'string' && v.trim() === v
 function httpUrl(v) { try { const u = new URL(v); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; } }
 function originOk(request) {
   const origin = request.headers.get('Origin');
-  if (!origin) return true;
-  try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
+  if (origin) {
+    try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
+  }
+  const site = (request.headers.get('Sec-Fetch-Site') || '').toLowerCase();
+  return !site || site === 'same-origin' || site === 'none';
+}
+async function enforceAuthRateLimit(request, env, action, subject = '', maxAttempts = 8, windowSec = 600) {
+  if (!env?.DB) return null;
+  const ip = (request.headers.get('CF-Connecting-IP') || 'local').trim().slice(0, 64);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const keys = [`${action}:ip:${ip}`, ...(subject ? [`${action}:sub:${subject.slice(0, 120)}`] : [])];
+  try {
+    await env.DB.prepare('DELETE FROM auth_rate_limits WHERE window_start < ?').bind(nowSec - windowSec).run().catch(() => {});
+    for (const k of keys) {
+      const row = await env.DB.prepare('SELECT attempts, window_start FROM auth_rate_limits WHERE bucket=?').bind(k).first();
+      if (row && row.window_start >= nowSec - windowSec && Number(row.attempts) >= maxAttempts) {
+        const retryAfter = String(Math.max(1, windowSec - (nowSec - Number(row.window_start))));
+        return json({ error: '尝试过于频繁，请稍后再试', error_code: 'RATE_LIMITED' }, 429, { 'retry-after': retryAfter });
+      }
+    }
+    return async (failed) => {
+      try {
+        if (!failed) {
+          if (subject) await env.DB.prepare('DELETE FROM auth_rate_limits WHERE bucket=?').bind(`${action}:sub:${subject.slice(0, 120)}`).run().catch(() => {});
+          return;
+        }
+        const at = now();
+        for (const k of keys) {
+          await env.DB.prepare(`INSERT INTO auth_rate_limits(bucket,attempts,window_start,updated_at) VALUES(?,1,?,?)
+            ON CONFLICT(bucket) DO UPDATE SET attempts = CASE WHEN auth_rate_limits.window_start < ? THEN 1 ELSE auth_rate_limits.attempts + 1 END,
+              window_start = CASE WHEN auth_rate_limits.window_start < ? THEN excluded.window_start ELSE auth_rate_limits.window_start END,
+              updated_at = excluded.updated_at`).bind(k, nowSec, at, nowSec - windowSec, nowSec - windowSec).run();
+        }
+      } catch { /* auth_rate_limits 未迁移时静默降级 */ }
+    };
+  } catch {
+    return async () => {};
+  }
 }
 function sessionCookieName(env, scope = 'user') {
   return scope === 'admin' ? (env.ADMIN_COOKIE_NAME || 'onepay_admin_session') : (env.COOKIE_NAME || 'onepay_session');
@@ -116,7 +160,9 @@ async function requireAdmin(request, env) {
 async function createSession(env, userId, role) {
   const token = b64(crypto.getRandomValues(new Uint8Array(32)));
   const days = Math.max(1, Math.min(30, Number(env.SESSION_DAYS || 14)));
-  const expires = Math.floor(Date.now() / 1000) + days * 86400;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const expires = nowSec + days * 86400;
+  await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(nowSec).run().catch(() => {});
   await env.DB.prepare('INSERT INTO sessions(token_hash,user_id,role,expires_at,created_at) VALUES(?,?,?,?,?)')
     .bind(await sha256(token), userId, role, expires, now()).run();
   return { token, maxAge: days * 86400 };
@@ -308,12 +354,19 @@ function parseTags(value) {
   return tags;
 }
 
-async function categoryAndChildren(env, categoryId) {
+async function categoryAndChildren(env, categoryId, publicOnly = false) {
   if (!categoryId) return [];
-  const rows = await env.DB.prepare('SELECT id,parent_id FROM categories').all();
+  const rows = await env.DB.prepare(
+    publicOnly ? "SELECT id,parent_id FROM categories WHERE status='ACTIVE'" : 'SELECT id,parent_id FROM categories'
+  ).all();
+  const list = rows.results || [];
+  const activeIds = new Set(list.map(r => r.id));
+  if (publicOnly && !activeIds.has(categoryId)) return [];
+  const rootRow = list.find(r => r.id === categoryId);
+  if (publicOnly && rootRow?.parent_id && !activeIds.has(rootRow.parent_id)) return [];
   const children = new Map();
-  for (const row of rows.results || []) {
-    if (!row.parent_id) continue;
+  for (const row of list) {
+    if (!row.parent_id || (publicOnly && !activeIds.has(row.parent_id))) continue;
     if (!children.has(row.parent_id)) children.set(row.parent_id, []);
     children.get(row.parent_id).push(row.id);
   }
@@ -529,7 +582,7 @@ async function listProducts(env, all = false, q = '', categoryId = '', tags = []
   if (!all) where.push("status='ACTIVE'");
   if (q) { where.push("(title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')"); const like = `%${q.replace(/[\\%_]/g, m => `\\${m}`)}%`; args.push(like, like); }
   if (categoryId) {
-    const ids = await categoryAndChildren(env, categoryId);
+    const ids = await categoryAndChildren(env, categoryId, !all);
     if (!ids.length) return { items: [] };
     where.push(`category_id IN (${ids.map(() => '?').join(',')})`);
     args.push(...ids);
@@ -641,7 +694,7 @@ async function listOrders(env, user, limit = 50, offset = 0) {
 }
 
 async function syncOrders(env, user, request) {
-  const rows = await env.DB.prepare("SELECT * FROM orders WHERE user_id=? AND status='PENDING' ORDER BY created_at DESC LIMIT 5").bind(user.id).all();
+  const rows = await env.DB.prepare("SELECT * FROM orders WHERE user_id=? AND status='PENDING' ORDER BY created_at ASC LIMIT 5").bind(user.id).all();
   let synced = 0;
   for (const order of rows.results || []) {
     const result = await processOrder(env, user, order, request);
@@ -851,9 +904,7 @@ async function route(request, env, ctx) {
   const url = new URL(request.url), path = url.pathname, method = request.method;
   if (method !== 'GET' && !originOk(request)) return fail(403, '请求来源校验失败', 'ORIGIN_REJECTED');
   if (path === '/api/health' && method === 'GET') {
-    let apiKeyConfigured = Boolean(env.YIRENFU_API_KEY), webhookSecretConfigured = Boolean(env.YIRENFU_WEBHOOK_SECRET);
-    try { apiKeyConfigured = Boolean(await apiKeyValue(env)); webhookSecretConfigured = Boolean(await webhookSecretValue(env)); } catch {}
-    return json({ ok: true, apiKeyConfigured, webhookSecretConfigured, storageConfigured: Boolean(env.BUCKET) });
+    return json({ ok: true });
   }
   if (path === '/api/config' && method === 'GET') return cachedPublicJson(request, async () => json(await config(env)), ctx);
   if (path === '/api/product' && method === 'GET') return cachedPublicJson(request, async () => relayUpstream(env, '/product'), ctx);
@@ -940,57 +991,69 @@ async function route(request, env, ctx) {
   if (path === '/api/auth/register' && method === 'POST') {
     const b = await bodyJson(request); const email = String(b.email || '').trim().toLowerCase(); const password = b.password;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || typeof password !== 'string' || password.length < 10 || password.length > 128) return fail(400, '请输入有效邮箱和至少 10 位密码', 'INVALID_ARGUMENT');
+    const guard = await enforceAuthRateLimit(request, env, 'register', '', 10, 900);
+    if (guard instanceof Response) return guard;
     const uid = id('usr_');
     const existing = await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(email).first();
-    if (existing) return fail(409, '该邮箱已注册，请直接登录', 'EMAIL_EXISTS');
+    if (existing) { if (guard) await guard(true); return fail(409, '该邮箱已注册，请直接登录', 'EMAIL_EXISTS'); }
     try { await env.DB.prepare('INSERT INTO users(id,email,password_hash,created_at,updated_at) VALUES(?,?,?,?,?)').bind(uid, email, await passwordHash(password), now(), now()).run(); }
     catch (e) {
       if (/UNIQUE|constraint/i.test(String(e && e.message))) return fail(409, '该邮箱已注册，请直接登录', 'EMAIL_EXISTS');
       console.error('register_failed', String(e && e.message || e));
-      return fail(500, `注册失败：${String(e && e.message || '数据库写入异常').slice(0, 160)}`, 'REGISTER_FAILED');
+      return fail(500, '注册失败，请稍后重试', 'REGISTER_FAILED');
     }
+    if (guard) await guard(true);
     const session = await createSession(env, uid, 'user');
-    return json({ ok: true, user: { id: uid, email } }, 201, { 'set-cookie': cookie(env.COOKIE_NAME || 'onepay_session', session.token, session.maxAge) });
+    return json({ ok: true, user: { id: uid, email } }, 201, { 'set-cookie': cookie(env.COOKIE_NAME || 'onepay_session', session.token, session.maxAge, request) });
   }
   if (path === '/api/auth/login' && method === 'POST') {
     const b = await bodyJson(request); const email = String(b.email || '').trim().toLowerCase();
+    const guard = await enforceAuthRateLimit(request, env, 'login', email, 6, 600);
+    if (guard instanceof Response) return guard;
     const account = await env.DB.prepare('SELECT id,email,password_hash,COALESCE(disabled,0) AS disabled FROM users WHERE email=?').bind(email).first();
-    if (!account || !await passwordMatches(String(b.password || ''), account.password_hash)) return fail(401, '邮箱或密码不正确', 'LOGIN_FAILED');
+    const matched = await passwordMatches(String(b.password || ''), account ? account.password_hash : DUMMY_PASSWORD_HASH);
+    if (!account || !matched) { if (guard) await guard(true); return fail(401, '邮箱或密码不正确', 'LOGIN_FAILED'); }
     if (account.disabled) return fail(403, '该账号已被停用，请联系管理员', 'ACCOUNT_DISABLED');
+    if (guard) await guard(false);
     const session = await createSession(env, account.id, 'user');
     await env.DB.prepare('UPDATE users SET last_login_at=? WHERE id=?').bind(now(), account.id).run().catch(() => {});
-    return json({ ok: true, user: { id: account.id, email: account.email } }, 200, { 'set-cookie': cookie(env.COOKIE_NAME || 'onepay_session', session.token, session.maxAge) });
+    return json({ ok: true, user: { id: account.id, email: account.email } }, 200, { 'set-cookie': cookie(env.COOKIE_NAME || 'onepay_session', session.token, session.maxAge, request) });
   }
   if (path === '/api/admin/login' && method === 'POST') {
     const b = await bodyJson(request);
     const email = String(b.email || '').trim().toLowerCase();
+    const guard = await enforceAuthRateLimit(request, env, 'admin_login', email, 5, 600);
+    if (guard instanceof Response) return guard;
     const account = await env.DB.prepare('SELECT id,email,password_hash,role,COALESCE(disabled,0) AS disabled FROM users WHERE email=?').bind(email).first();
-    if (!account || !await passwordMatches(String(b.password || ''), account.password_hash)) return fail(401, '邮箱或密码不正确', 'LOGIN_FAILED');
+    const matched = await passwordMatches(String(b.password || ''), account ? account.password_hash : DUMMY_PASSWORD_HASH);
+    if (!account || !matched) { if (guard) await guard(true); return fail(401, '邮箱或密码不正确', 'LOGIN_FAILED'); }
     if (account.disabled) return fail(403, '该账号已被停用，请联系管理员', 'ACCOUNT_DISABLED');
-    if (account.role !== 'admin') return fail(403, '该账号没有管理员权限', 'NOT_ADMIN');
+    if (account.role !== 'admin') { if (guard) await guard(true); return fail(403, '该账号没有管理员权限', 'NOT_ADMIN'); }
+    if (guard) await guard(false);
     const session = await createSession(env, account.id, 'admin');
     await env.DB.prepare('UPDATE users SET last_login_at=? WHERE id=?').bind(now(), account.id).run().catch(() => {});
     await audit(env, 'admin.login', account.id, account.email);
-    return json({ ok: true, user: { id: account.id, email: account.email, role: account.role } }, 200, { 'set-cookie': cookie(sessionCookieName(env, 'admin'), session.token, session.maxAge) });
+    return json({ ok: true, user: { id: account.id, email: account.email, role: account.role } }, 200, { 'set-cookie': cookie(sessionCookieName(env, 'admin'), session.token, session.maxAge, request) });
   }
   if (path === '/api/auth/logout' && method === 'POST') {
     const raw = getCookie(request, sessionCookieName(env, 'user'));
     if (raw) await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha256(raw)).run();
-    return json({ ok: true }, 200, { 'set-cookie': cookie(sessionCookieName(env, 'user'), '', 0) });
+    return json({ ok: true }, 200, { 'set-cookie': cookie(sessionCookieName(env, 'user'), '', 0, request) });
   }
   if (path === '/api/admin/logout' && method === 'POST') {
     const raw = getCookie(request, sessionCookieName(env, 'admin'));
     if (raw) await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha256(raw)).run();
-    return json({ ok: true }, 200, { 'set-cookie': cookie(sessionCookieName(env, 'admin'), '', 0) });
+    return json({ ok: true }, 200, { 'set-cookie': cookie(sessionCookieName(env, 'admin'), '', 0, request) });
   }
   if (path === '/api/access' && method === 'GET') {
     const user = await requireUser(request, env);
     const bonus = await bonusBalance(env, user.id);
     const used = await env.DB.prepare("SELECT COALESCE(SUM(bonus_points_used),0) AS used FROM orders WHERE user_id=? AND status='DELIVERED'").bind(user.id).first();
     const bonusUsed = Number(used?.used || 0);
+    const hasKey = Boolean(await apiKeyValue(env));
     try {
       const unavailable = await checkCapability(env, 'entitlement_query');
-      if (unavailable) return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+      if (unavailable) return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: hasKey ? null : bonus, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
       const result = await yirenfu(env, '/access', 'POST', { user_id: user.id });
       if (!result.response.ok) return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
       const data = result.data;
@@ -1000,7 +1063,7 @@ async function route(request, env, ctx) {
       const spendable = onepay === null ? null : (data.access_granted === true ? onepay : 0);
       return json({ ...data, bonus_points: bonus, bonus_used: bonusUsed, onepay_points: onepay, total_points: spendable === null ? null : bonus + spendable, upstream_available: true });
     } catch {
-      return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+      return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: hasKey ? null : bonus, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
     }
   }
   if (path === '/api/purchase' && method === 'POST') return purchasePointsHandler(request, env);
@@ -1125,6 +1188,10 @@ async function route(request, env, ctx) {
       const pid = id('prd_');
       const v = parsed.value;
       if (!await productCategoryOk(env, v.category_id)) return fail(400, '所选商品分类不存在', 'CATEGORY_NOT_FOUND');
+      if (v.product_kind !== 'SUBSCRIPTION' && v.delivery_type === 'FILE') {
+        if (!env.BUCKET) return fail(503, '尚未绑定 R2 存储', 'STORAGE_NOT_CONFIGURED');
+        if (!await env.BUCKET.head(v.file_key)) return fail(404, '交付文件不存在，请先上传文件到 R2', 'FILE_NOT_FOUND');
+      }
       await env.DB.prepare(`INSERT INTO products(id,title,summary,description,price_points,cover_url,category_id,tags,delivery_type,delivery_text,delivery_url,file_key,file_name,stock,status,sort_order,created_at,updated_at,preview_files,preview_source,preview_updated_at,preview_truncated,product_kind,allow_repeat,subscription_days,update_frequency)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .bind(pid, v.title, v.summary, v.description, v.price_points, v.cover_url, v.category_id, JSON.stringify(v.tags), v.delivery_type, v.delivery_text, v.delivery_url, v.file_key, v.file_name, v.stock, v.status, v.sort_order, now(), now(), JSON.stringify(v.preview_files), v.preview_source, v.preview_files.length ? now() : null, v.preview_truncated, v.product_kind, v.allow_repeat, v.subscription_days, v.update_frequency).run();
@@ -1200,6 +1267,10 @@ async function route(request, env, ctx) {
         if (!parsed.ok) return fail(400, parsed.error, 'INVALID_ARGUMENT');
         const v = parsed.value;
         if (!await productCategoryOk(env, v.category_id)) return fail(400, '所选商品分类不存在', 'CATEGORY_NOT_FOUND');
+        if (v.product_kind !== 'SUBSCRIPTION' && v.delivery_type === 'FILE') {
+          if (!env.BUCKET) return fail(503, '尚未绑定 R2 存储', 'STORAGE_NOT_CONFIGURED');
+          if (!await env.BUCKET.head(v.file_key)) return fail(404, '交付文件不存在，请先上传文件到 R2', 'FILE_NOT_FOUND');
+        }
         const samePreview = JSON.stringify(v.preview_files) === JSON.stringify(storedPreview(existing.preview_files)) &&
           v.preview_source === existing.preview_source && v.preview_truncated === Number(existing.preview_truncated || 0) && v.delivery_url === existing.delivery_url;
         const previewTime = v.preview_files.length ? (samePreview ? existing.preview_updated_at : now()) : null;
@@ -1233,9 +1304,32 @@ async function route(request, env, ctx) {
     if (path === '/api/admin/upload' && method === 'POST') return uploadFile(request, env);
     if (path === '/api/admin/storage' && method === 'GET') return json({ configured: Boolean(env.BUCKET), maxSize: MAX_UPLOAD_BYTES });
     if (path === '/api/admin/orders' && method === 'GET') {
+      // offset + status/email 过滤：订单量上来后，管理员必须能把某张卡单翻出来。
       const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 50) || 50));
-      const rows = await env.DB.prepare(`SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT ?`).bind(limit).all();
-      return json({ items: (rows.results || []).map(o => ({ ...orderView(o), user_id: o.user_id, email: o.user_email || '' })) });
+      const rawOffset = Number(url.searchParams.get('offset') || 0);
+      const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, Math.min(100000, rawOffset)) : 0;
+      const status = String(url.searchParams.get('status') || '').toUpperCase();
+      const email = String(url.searchParams.get('email') || '').trim().slice(0, 64);
+      const where = [], args = [];
+      if (['PENDING', 'DELIVERED', 'FAILED'].includes(status)) { where.push('o.status=?'); args.push(status); }
+      if (email) { where.push("u.email LIKE ? ESCAPE '\\'"); args.push(`%${email.replace(/[\\%_]/g, m => `\\${m}`)}%`); }
+      const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+      const rows = await env.DB.prepare(`SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id=o.user_id
+        ${clause} ORDER BY o.created_at DESC, o.idempotency_key DESC LIMIT ? OFFSET ?`).bind(...args, limit + 1, offset).all();
+      const items = rows.results || [];
+      const pendingRow = await env.DB.prepare("SELECT COUNT(*) AS c FROM orders WHERE status='PENDING'").first();
+      return json({
+        items: items.slice(0, limit).map(o => ({ ...orderView(o), user_id: o.user_id, email: o.user_email || '' })),
+        pending_total: Number(pendingRow?.c || 0),
+        has_more: items.length > limit,
+        next_offset: offset + limit,
+      });
+    }
+    // 手动触发卡单回收（与 cron 同一实现）。默认只扫 10 分钟以上的 PENDING。
+    if (path === '/api/admin/orders/reap' && method === 'POST') {
+      const report = await reapPendingOrders(env, { origin: url.origin });
+      await audit(env, 'orders.reap', 'pending', JSON.stringify(report));
+      return json({ ok: true, report });
     }
 
     if (path === '/api/admin/capabilities' && method === 'GET') return relayUpstream(env, '/capabilities');
@@ -1380,7 +1474,11 @@ async function route(request, env, ctx) {
   }
 
   if (path === '/api/webhook' && method === 'POST') {
-    const raw = await request.text(); const event = await verifyWebhook(request, env, raw);
+    const cl = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(cl) && cl > 65536) return fail(413, '通知请求体过大', 'BODY_TOO_LARGE');
+    const raw = await request.text();
+    if (raw.length > 65536) return fail(413, '通知请求体过大', 'BODY_TOO_LARGE');
+    const event = await verifyWebhook(request, env, raw);
     if (!event) return fail(401, '通知签名或时间戳校验失败', 'INVALID_WEBHOOK_SIGNATURE');
     const type = String(event.type || 'unknown').slice(0, 80); const userId = String(event.user_id || '').slice(0, 128);
     await env.DB.prepare('INSERT OR IGNORE INTO webhook_events(event_id,event_type,user_id,payload_json,received_at) VALUES(?,?,?,?,?)').bind(event.id, type, userId, raw, now()).run();
@@ -1461,6 +1559,11 @@ async function netdiskPreview(env, body, admin) {
 }
 
 export default {
+  // Cron Trigger：回收卡在 PENDING 的订单（见 src/reaper.js）。
+  async scheduled(event, env, ctx) {
+    const task = runMaintenance(env, ctx, env.SITE_ORIGIN || '');
+    if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
+  },
   async fetch(request, env, ctx) {
     const requestUrl = new URL(request.url);
     // Secure session cookies are rejected over plain HTTP, so a login would

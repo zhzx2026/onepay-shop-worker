@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <meta name="description" content="发现精选数字商品，用积分轻松兑换。">
 <title>云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -35,7 +35,7 @@
       <div class="hero-copy">
         <div class="hero-kicker"><span class="kicker-dot"></span> A LITTLE SOMETHING FOR YOU</div>
         <h1 class="display">把喜欢的，<br><em>轻松带走。</em></h1>
-        <p class="lead">好内容，值得被发现。<br>用积分兑换心仪的数字好物，把灵感收藏起来。</p>
+        <p class="lead" data-site-description>好内容，值得被发现。<br>用积分兑换心仪的数字好物，把灵感收藏起来。</p>
         <div class="actions hero-actions">
           <a class="sbtn primary" href="/shop">探索全部商品 <span aria-hidden="true">↗</span></a>
           <a class="text-link" href="#how-it-works">了解兑换流程 <span aria-hidden="true">↓</span></a>
@@ -99,7 +99,7 @@
   </div>
   <div class="container footer-bottom"><span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span><span>用一点积分，兑换一点喜欢。 &nbsp; ✦</span></div>
 </footer>
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-1"></script>
 <script>
 const { $, esc, api, initChrome, productCover } = Store;
 const categoryIcons = [
@@ -136,11 +136,11 @@ function renderFeatured(products, categories, canEdit = false) {
   grid.innerHTML = products.slice(0, 4).map((product, index) => {
     const category = categories.find(item => item.id === product.category_id)?.name || '数字好物';
     const soldOut = product.stock !== null && product.stock !== undefined && Number(product.stock) <= 0;
-    return `<article class="featured-card"><a class="featured-main" href="/shop?q=${encodeURIComponent(product.title)}">
+    return `<article class="featured-card"><a class="featured-main" href="/shop?product=${encodeURIComponent(product.id)}">
       ${productCover(product, index)}
       <div class="featured-body"><div class="product-cat">${esc(category)}</div><h3>${esc(product.title)}</h3>
         <p class="summary">${esc(product.summary || '探索更多值得收藏的数字内容')}</p>
-        <div class="featured-footer"><div class="price">${Number(product.price_points).toLocaleString('zh-CN')} <small>积分</small></div><span class="round-arrow" aria-label="查看商品">${soldOut ? '已售罄' : '↗'}</span></div></div>
+        <div class="featured-footer"><div class="price">${Number(product.price_points).toLocaleString('zh-CN')} <small>积分</small></div><span class="round-arrow" style="${soldOut ? 'border-radius:999px;font-size:11px;padding:0 10px' : ''}" aria-label="${soldOut ? '已售罄' : '查看商品'}">${soldOut ? '已售罄' : '↗'}</span></div></div>
     </a>${canEdit ? `<a class="admin-edit-link featured-edit" href="/admin?edit=${encodeURIComponent(product.id)}">✎ 编辑商品</a>` : ''}</article>`;
   }).join('');
 }

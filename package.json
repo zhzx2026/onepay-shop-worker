@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev --config wrangler.dev.toml --ip 0.0.0.0",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js && node --check src/cache.js && node --check src/netdisk.js && node --check src/bonus.js && node --check src/subscriptions.js && node --check src/agent.js && node --check public/storefront.js",
+    "check": "node --check src/index.js && node --check src/cache.js && node --check src/reaper.js && node --check src/netdisk.js && node --check src/bonus.js && node --check src/subscriptions.js && node --check src/agent.js && node --check public/storefront.js",
     "test": "node --test",
     "build:editor": "node scripts/build-editor.mjs",
     "predev": "npm run build:editor",

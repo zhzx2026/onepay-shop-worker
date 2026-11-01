@@ -166,5 +166,10 @@ export function withStaticCache(response, requestUrl) {
   } else {
     return response;
   }
+  headers.set('x-content-type-options', 'nosniff');
+  headers.set('x-frame-options', 'DENY');
+  headers.set('referrer-policy', 'strict-origin-when-cross-origin');
+  headers.set('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  if (url.protocol === 'https:') headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
