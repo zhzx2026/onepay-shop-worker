@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261031-5">
+<link rel="stylesheet" href="/admin.css?v=20261101-1">
 </head>
 <body>
 
@@ -283,7 +283,7 @@
     <section class="view hidden" id="view-users">
       <div class="panel">
         <div class="panel-title"><h2>用户管理</h2><button class="raw-trigger" data-raw-for="usersOut" onclick="openRaw('usersOut')" disabled>查看原数据 ↗</button></div>
-        <p class="sub">前台注册的邮箱账号。管理员是账号上的独立角色，与后台会话绑定；密码只以 PBKDF2 哈希存储，后台不可查看，只能重置。变更角色、停用或重置密码会立即让该用户所有会话失效。</p>
+        <p class="sub">前台注册的邮箱账号。管理员是账号上的独立角色，与后台会话绑定；密码只以 PBKDF2 哈希存储，后台不可查看，只能重置。变更角色、停用或重置密码会让该用户会话失效；管理员被降权、停用或重置密码时，其签发的 Agent 配对码和令牌也会失效。</p>
         <div class="actions" style="margin:0 0 12px">
           <input id="userQuery" class="searchbox" placeholder="按邮箱搜索" maxlength="64" onkeydown="if(event.key==='Enter')loadUsers(0)">
           <button class="btn" onclick="loadUsers(0)">搜索</button>
@@ -299,11 +299,26 @@
       <div class="panel agent-panel">
         <div class="series-eyebrow">EXTERNAL AGENT API</div><h2>让 Agent 帮你整理商品</h2>
         <p class="sub">已有安全隔离的外部 Agent 接口：先上传文件，再创建下架草稿；商品必须由管理员审核后手动上架。Agent 不能发布、修改其他商品或读取订单。</p>
-        <div class="agent-state"><span id="agentState">正在读取接口状态…</span><span id="agentStorage">R2 状态待确认</span></div>
+        <div class="agent-state"><span id="agentState">正在读取接口状态…</span><span id="agentStorage">R2 状态待确认</span><span id="agentLegacy" class="hidden">旧版固定令牌已配置</span></div>
+        <div class="pair-card">
+          <div class="pair-heading"><span class="pair-icon" aria-hidden="true">✳</span><div><div class="series-eyebrow">PAIR YOUR AGENT</div><h3>用配对码连接 Agent</h3><p>生成后发给受信任的 Agent，它会自动换取 30 天有效的专用密钥。</p></div></div>
+          <div class="pair-label-field field"><label for="pairLabel">Agent 备注（可选）</label><input id="pairLabel" maxlength="50" placeholder="例如：本地助手、资料整理 Agent" autocomplete="off"><small>用于日后识别和撤销，请勿填写密钥。</small></div>
+          <div class="actions"><button id="pairGenerate" type="button" class="btn" onclick="createAgentPair(this)" disabled>生成 10 位配对码</button><button type="button" class="btn secondary" onclick="copyAgentPrompt(this)">复制 agent.md 提示词</button><button type="button" class="btn secondary" onclick="loadStatus(this)">刷新状态</button></div>
+          <div id="pairResult" class="pair-result hidden">
+            <div class="pair-result-top"><div><span class="pair-label">一次性配对码</span><strong id="pairCode"></strong></div><span class="pair-timer" id="pairTimer"></span></div>
+            <p class="pair-help">仅供受信任的 Agent 使用，5 分钟内有效且只能使用一次。不要公开到群聊、仓库或链接中。</p>
+            <div class="actions"><button type="button" class="btn" onclick="copyPairCode(this)">复制配对码</button><button type="button" class="btn secondary" onclick="copyPairInstructions(this)">复制配对指令</button><button type="button" class="btn secondary" onclick="cancelAgentPair(this)">作废配对码</button></div>
+            <div id="pairCopyFallback" class="field hidden pair-copy-fallback"><label for="pairInstructions">复制失败，可手动复制配对指令</label><textarea id="pairInstructions" rows="6" readonly></textarea></div>
+          </div>
+          <div class="pair-feedback" id="pairFeedback" role="status" aria-live="polite">生成新配对码会作废你之前未使用的配对码。</div>
+        </div>
+        <div class="agent-section-title"><div><h3>已配对的 Agent</h3><p>密钥只在配对时交给 Agent，不会在后台再次显示。可随时撤销，30 天后自动失效。</p></div><button type="button" class="btn secondary" onclick="loadAgentTokens(this)">刷新列表</button></div>
+        <div id="agentTokens" class="agent-token-list"><div class="state">打开 Agent 接入后加载</div></div>
+        <button id="agentTokensMore" class="btn secondary hidden" type="button" onclick="loadAgentTokens(this, true)">加载更多</button>
+        <div class="agent-section-title"><div><h3>Agent 能做什么？</h3><p>接口仅允许上传文件并创建下架草稿，管理员审核后才能上架。</p></div></div>
         <div class="agent-steps"><div><b>01</b><span>上传文件<small>POST /api/agent/uploads · 最大 50 MB</small></span></div><div><b>02</b><span>创建草稿<small>POST /api/agent/drafts · 支持幂等重试</small></span></div><div><b>03</b><span>人工审核<small>在商品管理中检查内容并上架</small></span></div></div>
-        <div class="notice-line">启用需配置独立 Worker Secret <code>AGENT_API_TOKEN</code>（32–512 个非空白字符）并绑定 R2。凭据只应在受信任的 Agent 运行环境中提供；不要放进提示词、仓库、聊天或链接。</div>
-        <div class="actions"><button type="button" class="btn" onclick="copyAgentPrompt(this)">复制 agent.md 提示词</button><button type="button" class="btn secondary" onclick="loadStatus(this)">刷新接口状态</button></div>
-        <details class="agent-preview"><summary>查看将复制的提示词</summary><pre id="agentPrompt"></pre></details>
+        <div class="notice-line">绑定 R2 并应用最新数据库迁移后，配对无需另设 Worker Secret。旧版 <code>AGENT_API_TOKEN</code> 如已配置仍可使用且不会自动到期；如需停用，须单独移除该 Secret。配对码请仅交给你信任的 Agent。</div>
+        <details class="agent-preview"><summary>查看将复制的 agent.md 提示词</summary><pre id="agentPrompt"></pre></details>
       </div>
     </section>
 
@@ -404,7 +419,7 @@ async function api(path, o = {}) {
   return d;
 }
 function fmt(v) { if (!v) return '—'; const d = new Date(v); return isNaN(d.getTime()) ? v : d.toLocaleString('zh-CN', { hour12: false }); }
-let active = 'overview', GOODS = {}, ORDERS = [], CATEGORIES = [], STORAGE = false;
+let active = 'overview', GOODS = {}, ORDERS = [], CATEGORIES = [], STORAGE = false, PAIRING_READY = false;
 
 async function login(e) {
   e.preventDefault();
@@ -427,7 +442,7 @@ async function boot() {
     }
   } catch {}
 }
-async function logout() { await api('/api/admin/logout', { method: 'POST', body: '{}' }).catch(() => {}); location.reload(); }
+async function logout() { forgetAgentPair(''); await api('/api/admin/logout', { method: 'POST', body: '{}' }).catch(() => {}); location.reload(); }
 function tab(name, el) {
   active = name;
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
@@ -441,6 +456,7 @@ function tab(name, el) {
   if (name === 'orders') loadOrders();
   if (name === 'goods') { loadCategories(); loadGoods(); }
   if (name === 'categories') loadCategories();
+  if (name === 'agent') { loadStatus(); loadAgentTokens(); }
   if (name === 'security') { loadSecurity(); loadAudit(); }
 }
 
@@ -449,13 +465,15 @@ async function loadStatus(button) {
   return withBusy(button, async () => {
   try {
     const s = await api('/api/admin/status');
-    STORAGE = !!s.storageConfigured;
+    STORAGE = !!s.storageConfigured; PAIRING_READY = !!s.agentPairingReady;
     $('#keyState').textContent = s.apiKeyConfigured ? '已配置' : '待配置';
     $('#dbState').textContent = s.databaseConfigured ? '已连接' : '未连接';
     $('#hookState').textContent = s.webhookSecretConfigured ? '已配置' : '待配置';
     $('#storageState').textContent = STORAGE ? '已绑定 R2' : '未绑定';
-    $('#agentState').textContent = s.agentConfigured ? 'Agent 令牌已配置' : 'Agent 接口未启用';
+    $('#agentState').textContent = !PAIRING_READY ? '配对功能需要数据库迁移' : STORAGE ? 'Agent 配对可用' : '配对需要绑定 R2';
     $('#agentStorage').textContent = STORAGE ? 'R2 已绑定' : 'R2 未绑定';
+    $('#agentLegacy').classList.toggle('hidden', !s.agentConfigured);
+    $('#pairGenerate').disabled = !PAIRING_READY || !STORAGE;
     $('#sideStatus').textContent = s.apiKeyConfigured ? '支付凭证就绪' : '缺少支付凭证';
     $('#storageHint').textContent = STORAGE
       ? '文件上传到 Cloudflare R2，用户通过订单专属链接下载，不公开可枚举。'
@@ -1048,7 +1066,7 @@ async function toggleUserRole(id, role) {
   const u = USERS[id]; if (!u) return;
   const next = role === 'admin' ? 'user' : 'admin';
   const label = next === 'admin' ? '设为管理员' : '取消管理员权限';
-  if (!confirm(`${label}：${u.email}？\n角色变更后该账号现有登录会话会全部失效。`)) return;
+  if (!confirm(`${label}：${u.email}？\n角色变更后该账号现有登录会话会全部失效。${next === 'user' ? '\n其签发的 Agent 配对码和令牌也会失效。' : ''}`)) return;
   try {
     await api('/api/admin/users/' + encodeURIComponent(id) + '/role', { method: 'POST', body: JSON.stringify({ role: next }) });
     toast(next === 'admin' ? '已设为管理员' : '已取消管理员权限');
@@ -1057,17 +1075,17 @@ async function toggleUserRole(id, role) {
 }
 async function resetPassword(id) {
   const u = USERS[id]; if (!u) return;
-  const pw = prompt('为 ' + u.email + ' 设置新密码（至少 10 位）：'); if (!pw) return;
+  const pw = prompt('为 ' + u.email + ' 设置新密码（至少 10 位）。\n重置后该账号会话及其签发的 Agent 凭据会失效：'); if (!pw) return;
   try { const d = await api('/api/admin/users/' + encodeURIComponent(id) + '/reset-password', { method: 'POST', body: JSON.stringify({ password: pw }) }); toast(d.message || '密码已重置'); loadUsers(); } catch (e) { toast(e.message); }
 }
 async function toggleUser(id, disabled) {
   const u = USERS[id]; if (!u) return;
-  if (!confirm((disabled ? '停用' : '启用') + '账号 ' + u.email + '？' + (disabled ? '\n该用户所有会话会立即失效。' : ''))) return;
+  if (!confirm((disabled ? '停用' : '启用') + '账号 ' + u.email + '？' + (disabled ? '\n该用户所有会话及其签发的 Agent 配对码和令牌会失效。' : ''))) return;
   try { await api('/api/admin/users/' + encodeURIComponent(id) + '/status', { method: 'POST', body: JSON.stringify({ disabled: !!disabled }) }); toast(disabled ? '账号已停用' : '账号已启用'); loadUsers(); } catch (e) { toast(e.message); }
 }
 async function deleteUser(id) {
   const u = USERS[id]; if (!u) return;
-  if (!confirm('删除账号 ' + u.email + ' 及其充值 / 订单记录、剩余店铺赠送积分？此操作不可撤销；有待确认订单时不能删除。')) return;
+  if (!confirm('删除账号 ' + u.email + ' 及其充值 / 订单记录、剩余店铺赠送积分和签发的 Agent 凭据？此操作不可撤销；有待确认订单时不能删除。')) return;
   if (!confirm('再次确认删除 ' + u.email + ' ？')) return;
   try { await api('/api/admin/users/' + encodeURIComponent(id), { method: 'DELETE' }); toast('账号已删除'); loadUsers(); } catch (e) { toast(e.message); }
 }
@@ -1163,16 +1181,20 @@ async function deleteSeriesUpdate(id) {
   } catch (error) { toast(error.message); }
 }
 
-/* ---------- Agent 接入说明（仅占位符，不含真实凭据） ---------- */
+/* ---------- Agent 配对与接入 ---------- */
+let pairState = null, pairTicker = null, pairPoller = null, pairPolling = false;
+let agentTokens = [], agentTokenNext = 0, agentTokenSerial = 0;
 function agentMarkdown() {
   return `# agent.md · 积分商店 Agent
 
 你是商品整理助手。只处理用户明确授权的文件，检查内容、版权和价格；不确定时先询问。你不能上架商品或管理用户、订单。
 
-## 连接
-- API 基址：${location.origin}
-- 凭据：从受信任运行环境的 AGENT_API_TOKEN 环境变量读取（占位符：<AGENT_API_TOKEN>）。只通过 HTTPS 的 Authorization: Bearer 头发送。
-- 不要把令牌、个人信息或私密文件内容写进聊天、日志、URL、仓库或本提示词。无凭据时停止并请管理员通过安全方式配置，勿索取密码或验证码。
+## 安全配对
+- API 基址：${location.origin}。除本机隔离预览外，必须使用 HTTPS。
+- 请管理员在商店后台「Agent 接入」生成一次性 10 位配对码。它只在 5 分钟内有效，且只能使用一次；不要索取账号密码、短信验证码或 Cloudflare Secret。
+- POST /api/agent/pair，Content-Type: application/json，请求体为 {"code":"<管理员给的10位配对码>"}。code 是字符串，保留前导零；不要把它放在 URL 中。
+- 返回的 access_token 为 30 天有效的 Bearer 凭据。只将其存放在受限的本地凭据存储或环境变量 AGENT_API_TOKEN 中，不要在回复、日志、URL、仓库或提示词中输出密钥；后续请求使用 Authorization: Bearer <access_token>。
+- 配对码过期、用过或凭据被撤销 / 到期时，请管理员重新生成配对码。配对响应丢失时不可复用原码，应重新配对并由管理员检查、撤销不再使用的密钥。
 
 ## 工作流
 1. 确认管理员指定的文件、商品标题和整数积分价格；单文件不超过 50 MB。
@@ -1181,7 +1203,7 @@ function agentMarkdown() {
 4. 创建成功仅表示草稿已保存，状态固定为 HIDDEN。告知管理员到商品管理审核后手动上架，不得声称已发布。
 5. 草稿请求超时或失败时使用相同幂等编号和完全相同的内容重试；不同任务必须使用新编号。上传本身不去重，重复上传可能产生待清理文件。
 
-仅调用以上两个接口。不要尝试上架、编辑已有商品、读取用户数据或订单；遇到 401/503 时停止并通知管理员检查配置。
+仅调用配对、上传和草稿接口。不要尝试上架、编辑已有商品、读取用户数据或订单；不要输出私密文件内容。遇到 429 请按 Retry-After 等待；其他错误请说明情况并停止。
 `;
 }
 async function copyAgentPrompt(button) {
@@ -1191,6 +1213,103 @@ async function copyAgentPrompt(button) {
   });
 }
 $('#agentPrompt').textContent = agentMarkdown();
+function forgetAgentPair(message, success = false) {
+  clearInterval(pairTicker); clearInterval(pairPoller); pairTicker = null; pairPoller = null; pairState = null;
+  $('#pairCode').textContent = ''; $('#pairInstructions').value = ''; $('#pairCopyFallback').classList.add('hidden');
+  $('#pairResult').classList.add('hidden'); $('#pairFeedback').textContent = message;
+  $('#pairFeedback').classList.toggle('success', success);
+}
+function remainingPairSeconds() {
+  if (!pairState) return 0;
+  const left = Math.ceil((pairState.deadline - Date.now()) / 1000);
+  if (left <= 0) { forgetAgentPair('配对码已过期，请重新生成；如刚完成配对，可刷新下方密钥列表。'); loadAgentTokens(); return 0; }
+  $('#pairTimer').textContent = `剩余 ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  return left;
+}
+async function pollAgentPair() {
+  if (!pairState || pairPolling) return;
+  const id = pairState.id; pairPolling = true;
+  try {
+    const result = await api('/api/admin/agent/pairing/' + encodeURIComponent(id));
+    if (!pairState || pairState.id !== id) return;
+    if (result.status === 'USED') { forgetAgentPair('配对成功，Agent 已获得 30 天有效的专用密钥。', true); loadAgentTokens(); }
+    else if (result.status === 'EXPIRED') forgetAgentPair('配对码已过期，请重新生成。');
+    else if (result.status === 'CANCELED') forgetAgentPair('配对码已作废，请重新生成。');
+  } catch (e) {
+    if (pairState?.id === id && (e.status === 401 || e.status === 403)) forgetAgentPair('管理员会话已失效，请重新登录后再配对。');
+  } finally { pairPolling = false; }
+}
+async function createAgentPair(button) {
+  return withBusy(button, async () => {
+    forgetAgentPair('正在生成配对码…');
+    const started = Date.now();
+    try {
+      const data = await api('/api/admin/agent/pairing', { method: 'POST', body: JSON.stringify({ label: $('#pairLabel').value.trim() }) });
+      if (!/^\d{10}$/.test(data.code) || !/^pair_[a-f0-9-]{36}$/.test(data.pair_id) || data.expires_in !== 300) throw new Error('配对响应异常，请重新生成');
+      pairState = { id: data.pair_id, code: data.code, deadline: started + data.expires_in * 1000 };
+      $('#pairCode').textContent = data.code; $('#pairResult').classList.remove('hidden');
+      $('#pairFeedback').textContent = '把配对码或配对指令交给受信任的 Agent；页面会自动显示配对结果。';
+      if (remainingPairSeconds()) { pairTicker = setInterval(remainingPairSeconds, 1000); pairPoller = setInterval(pollAgentPair, 4000); }
+    } catch (e) { forgetAgentPair('未能生成配对码，请检查接口状态后重试。'); toast(e.message); }
+  });
+}
+async function cancelAgentPair(button) {
+  if (!pairState) return;
+  return withBusy(button, async () => {
+    try { await api('/api/admin/agent/pairing', { method: 'DELETE' }); forgetAgentPair('尚未使用的配对码已作废；已换出的密钥请在下方撤销。'); loadAgentTokens(); }
+    catch (e) { toast(e.message); }
+  });
+}
+async function copyPairCode(button) {
+  if (!remainingPairSeconds()) return toast('请先生成有效的配对码');
+  return withBusy(button, async () => {
+    try { await navigator.clipboard.writeText(pairState.code); toast('配对码已复制，请只交给受信任的 Agent'); }
+    catch { toast('复制失败，请手动选择并复制配对码'); }
+  });
+}
+function pairingInstructions() {
+  return `请帮我连接积分商店 Agent。站点：${location.origin}\n一次性配对码：${pairState.code}\n请在 5 分钟内按以下说明配对，不要公开配对码或返回的密钥。\n\n${agentMarkdown()}`;
+}
+async function copyPairInstructions(button) {
+  if (!remainingPairSeconds()) return toast('请先生成有效的配对码');
+  return withBusy(button, async () => {
+    const text = pairingInstructions();
+    try { await navigator.clipboard.writeText(text); toast('配对指令已复制，请只交给受信任的 Agent'); }
+    catch { $('#pairInstructions').value = text; $('#pairCopyFallback').classList.remove('hidden'); $('#pairInstructions').select(); toast('复制失败，可在下方手动复制'); }
+  });
+}
+function renderAgentTokens() {
+  if (!agentTokens.length) { $('#agentTokens').innerHTML = '<div class="state">还没有配对过 Agent。生成配对码后可在这里查看和撤销密钥。</div>'; return; }
+  $('#agentTokens').innerHTML = agentTokens.map(item => {
+    const revoked = item.revoked_at != null, expired = Number(item.expires_at) * 1000 <= Date.now();
+    const state = revoked ? '已撤销' : expired ? '已到期' : '有效中';
+    return `<div class="agent-token-row"><div class="agent-token-details"><b>${esc(item.label || '未命名 Agent')}</b><small>创建：${esc(fmt(Number(item.created_at) * 1000))} · 到期：${esc(fmt(Number(item.expires_at) * 1000))} · ${esc(item.issued_by || '已删除的管理员')}</small><small>编号 ${esc(item.id)}</small></div><span class="agent-token-state ${revoked || expired ? 'off' : ''}">${state}</span>${!revoked && !expired ? `<button class="rowbtn danger" type="button" data-agent-revoke="${esc(item.id)}">撤销</button>` : ''}</div>`;
+  }).join('');
+}
+async function loadAgentTokens(button, append = false) {
+  const serial = ++agentTokenSerial, offset = append ? agentTokenNext : 0;
+  return withBusy(button, async () => {
+    try {
+      const data = await api('/api/admin/agent/tokens?offset=' + offset);
+      if (serial !== agentTokenSerial) return;
+      const existing = new Set(append ? agentTokens.map(item => item.id) : []);
+      agentTokens = append ? [...agentTokens, ...(data.items || []).filter(item => !existing.has(item.id))] : (data.items || []);
+      agentTokenNext = data.next_offset; $('#agentTokensMore').classList.toggle('hidden', !data.has_more); renderAgentTokens();
+    } catch (e) {
+      if (serial !== agentTokenSerial) return;
+      if (append) toast(e.message);
+      else { $('#agentTokens').innerHTML = `<div class="state">${esc(e.message)}</div>`; $('#agentTokensMore').classList.add('hidden'); }
+    }
+  });
+}
+$('#agentTokens').addEventListener('click', async event => {
+  const button = event.target.closest('[data-agent-revoke]'); if (!button) return;
+  if (!confirm('撤销后该 Agent 将无法继续上传和创建草稿，需要重新配对。确定撤销？')) return;
+  return withBusy(button, async () => {
+    try { await api('/api/admin/agent/tokens/' + encodeURIComponent(button.dataset.agentRevoke), { method: 'DELETE' }); toast('Agent 密钥已撤销'); await loadAgentTokens(); }
+    catch (e) { toast(e.message); }
+  });
+});
 
 /* ---------- 通知 / 安全 ---------- */
 async function loadWebhook() { try { pretty($('#webhookState'), await api('/api/admin/webhook')); } catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); } }

@@ -24,7 +24,7 @@
 - **独立管理员登录**：使用已授予 `admin` 角色的普通账号邮箱和密码登录；后台使用独立 Cookie 与会话，不影响前台用户登录，退出后台也不会退出商店账号。旧的全局管理员密码入口已移除。
 - **商品管理**：上架 / 编辑 / 下架 / 删除商品。字段包含名称、副标题、详情、积分价、封面、所属分类、标签、库存（留空为不限）、排序、状态、是否允许重复购买及订阅规则。识别夸克 / 百度分享后自动加入平台标签，可尝试读取公开目录或手工填写；目录需要管理员检查并保存后才会公开。
 - **系列更新**：为同一订阅商品追加文字、链接或 R2 文件，支持草稿、发布、修改和删除；仅有效订阅者读取已发布内容。
-- **Agent 接入**：后台说明现有上传与草稿 API，并提供只含占位符的 `agent.md` 提示词一键复制。
+- **Agent 接入**：后台生成 5 分钟有效的一次性配对码，Agent 换取 30 天令牌；可查看、撤销已配对的 Agent，并复制 `agent.md` 提示词。
 - **分类管理**：管理一级分类与二级子分类，支持排序、启用 / 隐藏；分类下有子分类或商品时禁止删除。
 - **交付方式三选一**：
   - `文本`：兑换后直接显示文本内容，可复制（适合卡密、提取码、账号信息）。
@@ -52,7 +52,7 @@
 
 ### 升级已有数据库
 
-**新代码依赖 `0006_bonus_points.sql`、`0007_catalog_agent.sql` 和 `0008_subscriptions_and_repeat.sql`；上线前必须先迁移**，否则商品、兑换和订阅接口可能报错。`0008` 将旧商品设为不允许重复购买，历史订单视为普通商品订单，不会自动变为订阅。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换并确保**所有旧 Worker 版本停止处理兑换**，再应用迁移、部署新版本、验证后恢复流量。旧代码不能保证新的重复购买和订阅规则，迁移后不可让新旧版本同时处理兑换。未确认的旧订单保留原业务编号查询，不要重建或手工退款；回滚前应暂停兑换并核对新订单及权益，不能直接用旧版代码继续处理订阅。
+**新代码依赖 `0006_bonus_points.sql`、`0007_catalog_agent.sql`、`0008_subscriptions_and_repeat.sql` 和 `0009_agent_pairing.sql`；上线前必须先迁移**，否则商品、兑换、订阅、用户管理或 Agent 接口可能报错。`0008` 将旧商品设为不允许重复购买，历史订单视为普通商品订单，不会自动变为订阅；`0009` 新增 Agent 配对、凭据和限流表。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换及后台账号管理，确保**所有旧 Worker 版本停止处理兑换和管理请求**，再应用迁移、部署新版本、验证后恢复流量。旧版管理接口不会撤销新配对的 Agent 凭据，升级期间也不要让旧版处理 Agent / 管理请求。旧代码不能保证新的重复购买和订阅规则，迁移后不可让新旧版本同时处理兑换。未确认的旧订单保留原业务编号查询，不要重建或手工退款；回滚前应暂停兑换并核对新订单及权益，不能直接用旧版代码继续处理订阅。
 
 ```bash
 # 仅在获得正式上线授权后操作远程数据库
@@ -77,7 +77,7 @@ npx wrangler login
 npx wrangler d1 create onepay-shop
 ```
 
-4. 应用全部数据库迁移（包含商品、订单、账号角色、赠送积分、目录快照、Agent 幂等记录与订阅权益）：
+4. 应用全部数据库迁移（包含商品、订单、账号角色、赠送积分、目录快照、Agent 幂等记录、订阅权益与 Agent 配对）：
 
 ```bash
 npx wrangler d1 migrations apply onepay-shop --remote
@@ -186,7 +186,7 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | `DB` | D1 绑定 | 账号、会话、商品、订单、核销与去重记录 |
 | `BUCKET` | R2 绑定 | 私有商品文件及公开封面存储 |
 | `AI` | Workers AI 绑定 | 管理员手动生成封面；已在 Wrangler 配置 |
-| `AGENT_API_TOKEN` | 可选 Worker Secret | 外部 Agent 上传文件和创建隐藏草稿，未配置时接口关闭 |
+| `AGENT_API_TOKEN` | 可选 Worker Secret | 兼容旧版固定 Agent 令牌；配对模式不需要配置。旧固定令牌不会自动过期 |
 | `ASSETS` | 静态资源 | `public/` 下的前台与后台页面 |
 | `COOKIE_NAME` | 环境变量 | 前台用户会话 Cookie |
 | `ADMIN_COOKIE_NAME` | 环境变量 | 后台管理员独立会话 Cookie |
@@ -215,12 +215,16 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | POST | `/api/admin/logout` | 退出后台，不影响前台会话 |
 | GET/POST/PUT/DELETE | `/api/admin/products[/:id]` | 商品管理（含重复购买与订阅规则） |
 | GET/POST/PUT/DELETE | `/api/admin/products/:id/updates[/:update]` | 管理系列更新，列表每页 50 项 |
-| GET | `/api/admin/status` | 管理员读取服务、R2 与 Agent 令牌是否已配置；不返回 Agent 令牌 |
+| GET | `/api/admin/status` | 管理员读取服务、R2、Agent 配对数据库及旧版固定令牌配置状态；不返回凭据 |
+| POST/DELETE | `/api/admin/agent/pairing` | 生成或作废本管理员的一次性配对码 |
+| GET | `/api/admin/agent/pairing/:id` | 查询本管理员的配对码状态，不返回码 |
+| GET/DELETE | `/api/admin/agent/tokens[/:id]` | 列出、撤销已配对 Agent 的令牌，不返回明文 |
 | GET/POST/PUT/DELETE | `/api/admin/categories[/:id]` | 一级分类 / 二级子分类管理 |
 | POST | `/api/admin/upload` | 上传交付文件到 R2（multipart） |
 | POST | `/api/admin/netdisk/preview` | 管理员尝试读取公开分享目录，body `{ url, passcode? }`；仅返回文件名快照 |
 | POST | `/api/admin/covers/generate` | 管理员手动生成封面，body `{ prompt }` |
 | GET | `/api/covers/:id` | 公开查看生成的封面，不提供商品文件访问 |
+| POST | `/api/agent/pair` | 用 10 位配对码换取 30 天 Agent Bearer 令牌（匿名、一次性、限流） |
 | POST | `/api/agent/uploads` | Bearer 令牌上传 Agent 文件（multipart） |
 | POST | `/api/agent/drafts` | Bearer 令牌关联已上传文件并创建隐藏草稿（幂等） |
 | GET | `/api/admin/orders` | 成交订单列表 |
@@ -240,19 +244,31 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 
 ## 外部 Agent 文件接口
 
-后台「Agent 接入」可查看说明和接口配置状态，并一键复制 `agent.md` 提示词。复制内容只包含当前站点地址与凭据占位符，不包含任何 Worker Secret。
+Agent 只允许上传文件（单个不超过 50 MB）并创建**下架草稿**；它不能登录后台、发布商品、修改订单或读取用户资料。管理员仍需检查内容、价格、版权与分类，再手动上架。上传文件存入 R2 私有 `agent/` 前缀，下载仍需本人有效订单。
 
-Agent 只允许上传文件（单个不超过 50 MB）并创建**下架草稿**；它不能登录后台、发布商品、修改订单或读取用户资料。管理员仍需检查内容、价格、版权与分类，再手动上架。上传文件存入 R2 私有 `agent/` 前缀，下载仍需本人有效订单；Agent 文件 key 仅在认证后的上传结果与后台可见。
+### 推荐：一次性配对
 
-正式启用前，需要启用 R2、先应用迁移，再通过 Wrangler Secret 配置独立的高随机度 `AGENT_API_TOKEN`（32–512 个非空白字符，建议 32 字节随机值），不要复用任何其他凭证。下面是**未来获得上线授权后的配置示例**，不会自动部署：
+1. 先绑定 R2、应用全部 D1 迁移（包括 `0009_agent_pairing.sql`）并部署新版；这需要正式上线授权。配对方式不需要配置 `AGENT_API_TOKEN` Worker Secret。
+2. 登录后台的「Agent 接入」，可填写便于识别的备注（不要填密钥），点「生成 10 位配对码」。同一管理员生成新码会作废其旧的未使用码。
+3. 将配对码或「复制配对指令」交给**受信任的** Agent。配对指令含该一次性码，不应公开、写入仓库或放进 URL；纯 `agent.md` 提示词只含占位符。
+4. Agent 在 **5 分钟**内用 HTTPS POST `/api/agent/pair`，JSON 请求体为 `{"code":"<10位数字字符串>"}`（保留前导零）。成功响应仅显示一次 `access_token`、`credential_id`、`expires_at` 和 `expires_in`。Agent 应将令牌放进受限本地凭据存储或环境变量，不要回显到聊天、日志或仓库。
+5. 令牌有效期为 **30 天**、不会自动续期。过期或撤销后需重新配对；如配对响应丢失，旧码无法重用，应重新生成，并在后台检查和撤销不再使用的凭据。
+6. 后台「已配对的 Agent」可按备注查看状态和撤销。撤销阻止后续请求，已在处理中的请求可能完成。签发管理员被停用、降权或重置密码时，其配对码和令牌也会失效。
+
+配对码使用加盐 PBKDF2 哈希，Bearer 令牌使用 SHA-256 哈希；数据库不存储二者明文。匿名配对接口对每个客户端每 5 分钟最多 5 次，并设有每 5 分钟最多 100 次的全局上限；失败尝试也计数。达到限制返回 429 和 `Retry-After`。这些计数存储在 D1，客户端地址只保存哈希、不存明文；过期计数在后续配对请求时清理。这不能替代 Cloudflare WAF / 边缘限流以防止 D1 被流量耗尽。非同源浏览器请求会被拒绝，外部 Agent 应以服务端工具发起无 Origin 的 HTTPS 请求。
+
+### 旧版固定令牌（可选）
+
+如已设置 `AGENT_API_TOKEN` Worker Secret，旧 Agent 可继续使用它，但**该固定令牌不会自动过期，也不受后台配对令牌撤销操作影响**。如需只使用 30 天配对令牌，应在获得上线授权后单独移除旧 Secret；泄露时应立即轮换或移除。首次配置旧模式可使用高随机度 32–512 个非空白字符，不要复用其他凭据。
 
 ```bash
-# 生成随机令牌后通过安全通道设置，切勿把令牌写入 Git 或发到聊天中
-openssl rand -hex 32
+# 仅在获得线上配置授权后执行；在交互提示中输入随机值，不要写入仓库或聊天
 npx wrangler secret put AGENT_API_TOKEN
 ```
 
-之后 Agent 通过 HTTPS 使用 `Authorization: Bearer …` 请求，以下命令假定令牌已安全放入当前进程的 `AGENT_API_TOKEN` 环境变量（不要放在 URL 中）：
+### 上传和创建草稿
+
+无论使用配对令牌或旧版令牌，之后 Agent 通过 HTTPS 使用 `Authorization: Bearer …` 请求，以下命令假定令牌已安全放入当前进程的 `AGENT_API_TOKEN` 环境变量（不要放在 URL 中）：
 
 ```bash
 # 第一步：上传已由外部 Agent 生成的文件；响应含 key、name、size
@@ -266,7 +282,7 @@ curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
   -d '{"idempotency_key":"agent-job-unique-001","title":"生成的资料包","price_points":20,"file_key":"上传响应中的key","file_name":"generated.zip","tags":["资料"]}'
 ```
 
-相同编号和内容重试返回原草稿；同一编号用于不同内容返回 409；草稿删除后原编号不能重新创建。Agent 即使提交 `status: ACTIVE` 也只会得到隐藏草稿。上传请求本身不去重，失败重试可能留下未关联文件，应定期清理 R2 中无引用的 `agent/` 对象。令牌泄露时立即轮换 Worker Secret，并建议在 Cloudflare 配置 API 速率限制；本接口没有内置全局速率限制。
+相同编号和内容重试返回原草稿；同一编号用于不同内容返回 409；草稿删除后原编号不能重新创建。Agent 即使提交 `status: ACTIVE` 也只会得到隐藏草稿。上传请求本身不去重，失败重试可能留下未关联文件，应定期清理 R2 中无引用的 `agent/` 对象。配对令牌泄露时在后台立即撤销；旧版固定令牌需单独轮换或移除。上传与草稿接口尚无内置全局限流，建议额外配置 Cloudflare WAF / API 速率限制。
 
 ## 缓存策略
 

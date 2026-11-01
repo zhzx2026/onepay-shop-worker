@@ -189,10 +189,12 @@ test('static shells and versioned assets have bounded caching; admin and cookies
 
 test('private Worker endpoints never access the shared cache, and static HEAD is supported', async t => {
   const cache = installCache(t);
-  for (const path of ['/api/auth/me', '/api/orders', '/api/access', '/api/library', '/api/subscriptions', '/api/subscriptions/p_test/updates', '/api/subscriptions/p_test/updates/u_test/file', '/api/admin/status', '/api/download/example']) {
+  for (const path of ['/api/auth/me', '/api/orders', '/api/access', '/api/library', '/api/subscriptions', '/api/subscriptions/p_test/updates', '/api/subscriptions/p_test/updates/u_test/file', '/api/admin/status', '/api/admin/agent/tokens', '/api/admin/agent/pairing/pair_00000000-0000-4000-8000-000000000001', '/api/download/example']) {
     const response = await worker.fetch(request(path), {});
     assert.match(response.headers.get('cache-control'), /private, no-store/, path);
   }
+  const pairing = await worker.fetch(request('/api/agent/pair', { method: 'POST', body: '{"code":"1234567890"}' }), {});
+  assert.match(pairing.headers.get('cache-control'), /private, no-store/);
   assert.equal(cache.operations.length, 0);
   const response = await worker.fetch(request('/account', { method: 'HEAD' }), {
     ASSETS: { async fetch(req) { assert.equal(req.method, 'HEAD'); return new Response(null, { headers: { 'content-type': 'text/html' } }); } },

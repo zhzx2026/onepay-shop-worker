@@ -2,6 +2,7 @@ import { cachedPublicJson, invalidatePublicCache, withStaticCache, productTagFil
 import { detectNetdisk, providerTags, normalizePreview, readShareDirectory } from './netdisk.js';
 import { bonusBalance, bonusHistory, adjustBonus, reserveOrder, refundOrder } from './bonus.js';
 import { SUBSCRIPTION_FREQUENCIES, validSubscriptionDays, isSubscriptionActive, finalizeSubscriptionOrder, subscriptionFor, subscriptionView, parseSubscriptionUpdate, subscriberUpdateView } from './subscriptions.js';
+import { pairingSchemaReady, issuePairCode, cancelPairCodes, pairCodeStatus, recordPairAttempt, exchangePairCode, validPairedAgent, listAgentTokens, revokeAgentToken } from './agent.js';
 
 const API = 'https://ai6666.com/opcpay/api/pay/v1';
 const encoder = new TextEncoder();
@@ -49,6 +50,29 @@ function getCookie(request, name) {
 async function bodyJson(request, max = 65536) {
   const text = await request.text();
   if (text.length > max) throw new Error('BODY_TOO_LARGE');
+  const data = JSON.parse(text || '{}');
+  if (!data || Array.isArray(data) || typeof data !== 'object') throw new Error('INVALID_JSON');
+  return data;
+}
+// Public pairing accepts only tiny JSON. Bound the stream before buffering it,
+// including chunked requests that omit or lie about Content-Length.
+async function smallBodyJson(request, max = 1024) {
+  const length = Number(request.headers.get('content-length') || 0);
+  if (Number.isFinite(length) && length > max) throw new Error('BODY_TOO_LARGE');
+  const reader = request.body?.getReader(), decoder = new TextDecoder();
+  let size = 0, text = '';
+  if (reader) {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > max) { try { await reader.cancel(); } catch {} throw new Error('BODY_TOO_LARGE'); }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } finally { reader.releaseLock(); }
+  }
   const data = JSON.parse(text || '{}');
   if (!data || Array.isArray(data) || typeof data !== 'object') throw new Error('INVALID_JSON');
   return data;
@@ -694,21 +718,31 @@ async function uploadFile(request, env, source = 'goods') {
   return json({ ok: true, key, name: safeName, size: file.size, type: file.type || '' });
 }
 
-// Agent credentials have no admin or publishing privileges. The secret never
-// enters D1, URLs, public responses, or audit logs.
+// Agent credentials never grant admin or publishing privileges. Keep the old
+// Worker Secret as an optional compatibility path; paired tokens expire and
+// can be revoked independently. Neither raw credential is stored in D1.
 function agentConfigured(env) {
   return /^[^\s]{32,512}$/.test(String(env.AGENT_API_TOKEN || ''));
 }
 async function requireAgent(request, env) {
-  const secret = String(env.AGENT_API_TOKEN || '');
-  if (!agentConfigured(env)) throw Object.assign(new Error('Agent 接口未配置安全令牌'), { status: 503, code: 'AGENT_NOT_CONFIGURED' });
   const match = (request.headers.get('authorization') || '').match(/^Bearer ([^\s]{1,512})$/i);
   const candidate = match?.[1] || '';
-  if (!constantEq(await sha256(candidate), await sha256(secret))) {
-    throw Object.assign(new Error('Agent 令牌无效'), { status: 401, code: 'AGENT_UNAUTHORIZED' });
+  if (agentConfigured(env) && constantEq(await sha256(candidate), await sha256(String(env.AGENT_API_TOKEN)))) return;
+  if (/^agt_[A-Za-z0-9_-]{43}$/.test(candidate)) {
+    let valid;
+    try { valid = await validPairedAgent(env, candidate); }
+    catch { throw Object.assign(new Error('Agent 配对功能暂不可用，请确认数据库迁移'), { status: 503, code: 'AGENT_PAIRING_UNAVAILABLE' }); }
+    if (valid) return;
   }
+  throw Object.assign(new Error('Agent 令牌无效或已过期，请重新配对'), { status: 401, code: 'AGENT_UNAUTHORIZED' });
 }
 
+function revokeIssuedAgentStatements(env, userId) {
+  return [
+    env.DB.prepare('DELETE FROM agent_pair_codes WHERE issued_by=? AND used_at IS NULL').bind(userId),
+    env.DB.prepare('UPDATE agent_tokens SET revoked_at=? WHERE issued_by=? AND revoked_at IS NULL').bind(Math.floor(Date.now() / 1000), userId),
+  ];
+}
 function agentProductView(product) {
   return { id: product.id, title: product.title, status: product.status, price_points: product.price_points, created_at: product.created_at };
 }
@@ -822,6 +856,23 @@ async function route(request, env, ctx) {
   // Only generated cover images are public; product files remain order-protected.
   const coverMatch = path.match(/^\/api\/covers\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
   if (coverMatch && method === 'GET') return publicCover(env, coverMatch[1]);
+
+  // Pairing is the only unauthenticated Agent operation. The code is sent in
+  // the body, rate-limited before validation, single-use and never logged.
+  if (path === '/api/agent/pair' && method === 'POST') {
+    let allowed;
+    try { allowed = await recordPairAttempt(env, request.headers.get('CF-Connecting-IP')); }
+    catch { return fail(503, 'Agent 配对暂不可用，请检查数据库迁移', 'AGENT_PAIRING_UNAVAILABLE'); }
+    if (!allowed) return json({ error: '配对尝试过于频繁，请稍后重试', error_code: 'PAIR_RATE_LIMITED' }, 429, { 'retry-after': '300' });
+    const body = await smallBodyJson(request);
+    if (typeof body.code !== 'string' || !/^\d{10}$/.test(body.code)) return fail(400, '配对码应为 10 位数字字符串', 'INVALID_PAIR_CODE');
+    let pair;
+    try { pair = await exchangePairCode(env, body.code); }
+    catch { return fail(503, 'Agent 配对暂不可用，请稍后重试', 'AGENT_PAIRING_UNAVAILABLE'); }
+    if (!pair) return fail(401, '配对码无效、已过期或已使用，请管理员重新生成', 'PAIR_CODE_INVALID');
+    await audit(env, 'agent.paired', pair.credential_id, '一次性配对成功');
+    return json(pair, 201);
+  }
 
   // The external agent can upload and create hidden drafts, never publish.
   if (path.startsWith('/api/agent/')) {
@@ -959,6 +1010,41 @@ async function route(request, env, ctx) {
 
   if (path.startsWith('/api/admin/')) {
     const admin = await requireAdmin(request, env);
+    if (path === '/api/admin/agent/pairing' && method === 'POST') {
+      if (!env.BUCKET) return fail(503, '请先绑定 R2，Agent 才能上传文件', 'STORAGE_NOT_CONFIGURED');
+      if (!await pairingSchemaReady(env)) return fail(503, '请先应用 0009 Agent 配对数据库迁移', 'AGENT_PAIRING_UNAVAILABLE');
+      const body = await smallBodyJson(request);
+      const label = typeof body.label === 'string' ? body.label.trim() : '';
+      if ((body.label !== undefined && typeof body.label !== 'string') || label.length > 50 || /[\u0000-\u001f\u007f]/.test(label)) return fail(400, 'Agent 备注需为 50 字以内的普通文本', 'INVALID_ARGUMENT');
+      const pair = await issuePairCode(env, admin.id, label);
+      if (!pair) return fail(401, '管理员状态已变化，请重新登录', 'AUTH_REQUIRED');
+      await audit(env, 'agent.pair_code_created', admin.id, '创建一次性配对码');
+      return json(pair, 201);
+    }
+    if (path === '/api/admin/agent/pairing' && method === 'DELETE') {
+      if (!await pairingSchemaReady(env)) return fail(503, '请先应用 0009 Agent 配对数据库迁移', 'AGENT_PAIRING_UNAVAILABLE');
+      await cancelPairCodes(env, admin.id);
+      await audit(env, 'agent.pair_code_canceled', admin.id, '取消尚未使用的配对码');
+      return json({ ok: true });
+    }
+    const agentPairRoute = path.match(/^\/api\/admin\/agent\/pairing\/(pair_[A-Za-z0-9-]{36})$/);
+    if (agentPairRoute && method === 'GET') {
+      if (!await pairingSchemaReady(env)) return fail(503, '请先应用 0009 Agent 配对数据库迁移', 'AGENT_PAIRING_UNAVAILABLE');
+      return json(await pairCodeStatus(env, admin.id, agentPairRoute[1]));
+    }
+    if (path === '/api/admin/agent/tokens' && method === 'GET') {
+      if (!await pairingSchemaReady(env)) return fail(503, '请先应用 0009 Agent 配对数据库迁移', 'AGENT_PAIRING_UNAVAILABLE');
+      const rawOffset = Number(url.searchParams.get('offset') || 0);
+      const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, Math.min(100000, rawOffset)) : 0;
+      return json(await listAgentTokens(env, offset));
+    }
+    const agentTokenRoute = path.match(/^\/api\/admin\/agent\/tokens\/(agt_[A-Za-z0-9-]{36})$/);
+    if (agentTokenRoute && method === 'DELETE') {
+      if (!await pairingSchemaReady(env)) return fail(503, '请先应用 0009 Agent 配对数据库迁移', 'AGENT_PAIRING_UNAVAILABLE');
+      if (!await revokeAgentToken(env, agentTokenRoute[1])) return fail(404, 'Agent 密钥不存在', 'AGENT_TOKEN_NOT_FOUND');
+      await audit(env, 'agent.token_revoked', agentTokenRoute[1], '管理员撤销 Agent 凭据');
+      return json({ ok: true });
+    }
     if (path === '/api/admin/config' && method === 'GET') return json(await config(env));
     if (path === '/api/admin/config' && method === 'PUT') {
       const b = await bodyJson(request); const siteName = String(b.siteName || '').trim(); const description = String(b.description || '').trim();
@@ -1182,7 +1268,7 @@ async function route(request, env, ctx) {
     }
     if (path === '/api/admin/status' && method === 'GET') {
       const state = await secretState(env);
-      return json({ apiKeyConfigured: state.apiKeySource !== 'none', webhookSecretConfigured: state.webhookSecretSource !== 'none', databaseConfigured: Boolean(env.DB), agentConfigured: agentConfigured(env), ...state });
+      return json({ apiKeyConfigured: state.apiKeySource !== 'none', webhookSecretConfigured: state.webhookSecretSource !== 'none', databaseConfigured: Boolean(env.DB), agentConfigured: agentConfigured(env), agentPairingReady: await pairingSchemaReady(env), ...state });
     }
     if (path === '/api/admin/security' && method === 'GET') return json(await secretState(env));
     if (path === '/api/admin/api-key' && method === 'POST') {
@@ -1233,24 +1319,32 @@ async function route(request, env, ctx) {
         const role = String(b.role || '');
         if (!['user', 'admin'].includes(role)) return fail(400, '角色无效', 'INVALID_ARGUMENT');
         if (targetId === admin.id && role !== 'admin') return fail(400, '不能取消当前登录账号自己的管理员权限', 'SELF_DEMOTION_FORBIDDEN');
-        await env.DB.prepare('UPDATE users SET role=?,updated_at=? WHERE id=?').bind(role, now(), targetId).run();
-        await env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId).run();
+        await env.DB.batch([
+          env.DB.prepare('UPDATE users SET role=?,updated_at=? WHERE id=?').bind(role, now(), targetId),
+          env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId),
+          ...(role === 'admin' ? [] : revokeIssuedAgentStatements(env, targetId)),
+        ]);
         await audit(env, role === 'admin' ? 'user.promoted_admin' : 'user.demoted_admin', targetId, target.email);
         return json({ ok: true, role });
       }
       if (action === 'reset-password' && method === 'POST') {
         const b = await bodyJson(request);
         if (typeof b.password !== 'string' || b.password.length < 10 || b.password.length > 128) return fail(400, '新密码需为 10-128 位', 'INVALID_ARGUMENT');
-        await env.DB.prepare('UPDATE users SET password_hash=?,updated_at=? WHERE id=?').bind(await passwordHash(b.password), now(), targetId).run();
-        await env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId).run();
+        await env.DB.batch([
+          env.DB.prepare('UPDATE users SET password_hash=?,updated_at=? WHERE id=?').bind(await passwordHash(b.password), now(), targetId),
+          env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId),
+          ...revokeIssuedAgentStatements(env, targetId),
+        ]);
         await audit(env, 'user.password_reset', targetId, target.email);
-        return json({ ok: true, message: '密码已重置，该用户所有登录会话已失效' });
+        return json({ ok: true, message: '密码已重置，该用户登录会话和签发的 Agent 凭据已失效' });
       }
       if (action === 'status' && method === 'POST') {
         const b = await bodyJson(request); const disabled = b.disabled === true;
         if (disabled && targetId === admin.id) return fail(400, '不能停用当前登录的管理员账号', 'SELF_DISABLE_FORBIDDEN');
-        await env.DB.prepare('UPDATE users SET disabled=?,updated_at=? WHERE id=?').bind(disabled ? 1 : 0, now(), targetId).run();
-        if (disabled) await env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId).run();
+        await env.DB.batch([
+          env.DB.prepare('UPDATE users SET disabled=?,updated_at=? WHERE id=?').bind(disabled ? 1 : 0, now(), targetId),
+          ...(disabled ? [env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(targetId), ...revokeIssuedAgentStatements(env, targetId)] : []),
+        ]);
         await audit(env, disabled ? 'user.disabled' : 'user.enabled', targetId, target.email);
         return json({ ok: true, disabled });
       }
@@ -1266,9 +1360,11 @@ async function route(request, env, ctx) {
           env.DB.prepare(`DELETE FROM subscriptions WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM orders WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM bonus_wallets WHERE user_id=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM agent_pair_codes WHERE issued_by=? AND ${noPending}`).bind(targetId, targetId),
+          env.DB.prepare(`DELETE FROM agent_tokens WHERE issued_by=? AND ${noPending}`).bind(targetId, targetId),
           env.DB.prepare(`DELETE FROM users WHERE id=? AND ${noPending}`).bind(targetId, targetId),
         ]);
-        if (!Number(deleted[6]?.meta?.changes || 0)) return fail(409, '该用户有待确认订单，请先同步订单后再删除', 'USER_HAS_PENDING_ORDERS');
+        if (!Number(deleted[8]?.meta?.changes || 0)) return fail(409, '该用户有待确认订单，请先同步订单后再删除', 'USER_HAS_PENDING_ORDERS');
         // Ledger rows are retained as an immutable reconciliation trail.
         await audit(env, 'user.deleted', targetId, target.email);
         return json({ ok: true });
