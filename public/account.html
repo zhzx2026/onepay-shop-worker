@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>个人中心 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -180,7 +180,7 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-1"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
 let me = null, points = null, authMode = 'login';
@@ -269,7 +269,10 @@ async function loadAccess() {
     $('#pointsBreakdown').textContent = data.upstream_available
       ? `店铺赠送 ${bonus} · 支付宝 ${data.onepay_points === null ? '未知' : Number(data.onepay_points || 0)}${data.access_granted === false && data.onepay_points ? '（当前不可用）' : ''}`
       : `店铺赠送 ${bonus} · 支付宝积分暂不可用`;
-    $('#statUsed').textContent = Number.isFinite(data.used) ? data.used + Number(data.bonus_used || 0) : (data.bonus_used ? data.bonus_used + ' + ?' : '—');
+    // 服务端从本地已交付订单汇总总消耗，不再依赖一人付是否返回 used。
+    $('#statUsed').textContent = Number.isFinite(Number(data.used_points))
+      ? Number(data.used_points)
+      : (data.bonus_used ? Number(data.bonus_used) + ' + ?' : '—');
     setPoints(points);
   } catch (error) {
     points = null;
@@ -297,22 +300,35 @@ async function loadPlans(button) {
       const options = Array.isArray(data.charging_options) ? data.charging_options : [];
       $('#planStatus').textContent = `${modeLabel(data.billing_mode)} · 状态 ${data.capability_status || '未知'}`;
       if (!options.length) {
+        planOptions = [];
         grid.innerHTML = `<div class="empty-state"><b>${data.capability_status === 'NOT_CONFIGURED' ? '收费方式尚未配置' : '暂时没有可售充值套餐'}</b>请稍后再试，或联系管理员。</div>`;
         return;
       }
       const open = data.capability_status === 'ENABLED';
-      grid.innerHTML = options.map(option => `<article class="plan-card">
+      // 套餐渲染为纯 data 属性，购买按钮用事件委托绑定，避免把上游字段拼进内联脚本。
+      planOptions = options;
+      grid.innerHTML = options.map((option, index) => `<article class="plan-card">
         <div class="plan-name">${esc(option.display_name || '积分套餐')}</div>
         <div class="plan-detail">${esc(planDetail(option))}</div>
         <div class="plan-price">${esc(option.price || '—')} <small>${esc(option.currency || 'CNY')}</small></div>
-        <button class="sbtn sm primary" ${open ? '' : 'disabled'} onclick="buyPoints('${esc(option.sku_id || '')}', this)">${open ? '支付宝充值' : '暂不可购买'}</button>
+        <button class="sbtn sm primary" ${open ? '' : 'disabled'} data-plan-buy="${index}">${open ? '支付宝充值' : '暂不可购买'}</button>
       </article>`).join('');
     } catch (error) {
+      planOptions = [];
       grid.innerHTML = `<div class="empty-state"><b>暂时无法读取充值套餐</b>${esc(error.message)}</div>`;
       $('#planStatus').textContent = '服务端只读查询暂不可用';
     }
   });
 }
+
+// 套餐按钮的唯一入口：从渲染时保存的选项数组取 sku，不再拼内联 onclick。
+let planOptions = [];
+$('#planGrid').addEventListener('click', event => {
+  const button = event.target.closest('[data-plan-buy]');
+  if (!button || button.disabled) return;
+  const option = planOptions[Number(button.dataset.planBuy)];
+  if (option) buyPoints(String(option.sku_id || ''), button);
+});
 
 async function buyPoints(sku, button) {
   return withBusy(button, async () => {

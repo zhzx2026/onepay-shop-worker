@@ -113,6 +113,25 @@ async function requireAdmin(request, env) {
   if (!user || user.role !== 'admin') throw Object.assign(new Error('需要管理员账号登录'), { status: 401, code: 'AUTH_REQUIRED' });
   return user;
 }
+// Shared in-D1 counter for unauthenticated sensitive endpoints (login,
+// register). Fails open when the limits table is missing so older databases
+// still accept logins; IPs are stored only as hashes.
+async function rateLimitExceeded(env, rawIp, kind, limit, windowSeconds) {
+  const at = Math.floor(Date.now() / 1000);
+  try {
+    const scope = `${kind}:${await sha256(`onepay-rate-v1:${kind}:${String(rawIp || '').trim()}`)}`;
+    const result = await env.DB.batch([
+      env.DB.prepare('DELETE FROM agent_pair_limits WHERE scope LIKE ? AND window_start<=?').bind(`${kind}:%`, at - windowSeconds),
+      env.DB.prepare(`INSERT INTO agent_pair_limits(scope,window_start,attempts) VALUES(?,?,1)
+        ON CONFLICT(scope) DO UPDATE SET attempts=attempts+1 WHERE attempts<?`).bind(scope, at, limit),
+    ]);
+    return !Number(result[1]?.meta?.changes || 0);
+  } catch { return false; }
+}
+function rateLimitedResponse(seconds = 300) {
+  return json({ error: '尝试过于频繁，请稍后再试', error_code: 'RATE_LIMITED' }, 429, { 'retry-after': String(seconds) });
+}
+
 async function createSession(env, userId, role) {
   const token = b64(crypto.getRandomValues(new Uint8Array(32)));
   const days = Math.max(1, Math.min(30, Number(env.SESSION_DAYS || 14)));
@@ -938,6 +957,7 @@ async function route(request, env, ctx) {
       : json({ authenticated: false });
   }
   if (path === '/api/auth/register' && method === 'POST') {
+    if (await rateLimitExceeded(env, request.headers.get('CF-Connecting-IP'), 'register', 10, 3600)) return rateLimitedResponse(3600);
     const b = await bodyJson(request); const email = String(b.email || '').trim().toLowerCase(); const password = b.password;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || typeof password !== 'string' || password.length < 10 || password.length > 128) return fail(400, '请输入有效邮箱和至少 10 位密码', 'INVALID_ARGUMENT');
     const uid = id('usr_');
@@ -953,6 +973,7 @@ async function route(request, env, ctx) {
     return json({ ok: true, user: { id: uid, email } }, 201, { 'set-cookie': cookie(env.COOKIE_NAME || 'onepay_session', session.token, session.maxAge) });
   }
   if (path === '/api/auth/login' && method === 'POST') {
+    if (await rateLimitExceeded(env, request.headers.get('CF-Connecting-IP'), 'login', 10, 300)) return rateLimitedResponse(300);
     const b = await bodyJson(request); const email = String(b.email || '').trim().toLowerCase();
     const account = await env.DB.prepare('SELECT id,email,password_hash,COALESCE(disabled,0) AS disabled FROM users WHERE email=?').bind(email).first();
     if (!account || !await passwordMatches(String(b.password || ''), account.password_hash)) return fail(401, '邮箱或密码不正确', 'LOGIN_FAILED');
@@ -962,6 +983,7 @@ async function route(request, env, ctx) {
     return json({ ok: true, user: { id: account.id, email: account.email } }, 200, { 'set-cookie': cookie(env.COOKIE_NAME || 'onepay_session', session.token, session.maxAge) });
   }
   if (path === '/api/admin/login' && method === 'POST') {
+    if (await rateLimitExceeded(env, request.headers.get('CF-Connecting-IP'), 'admin_login', 10, 300)) return rateLimitedResponse(300);
     const b = await bodyJson(request);
     const email = String(b.email || '').trim().toLowerCase();
     const account = await env.DB.prepare('SELECT id,email,password_hash,role,COALESCE(disabled,0) AS disabled FROM users WHERE email=?').bind(email).first();
@@ -986,21 +1008,21 @@ async function route(request, env, ctx) {
   if (path === '/api/access' && method === 'GET') {
     const user = await requireUser(request, env);
     const bonus = await bonusBalance(env, user.id);
-    const used = await env.DB.prepare("SELECT COALESCE(SUM(bonus_points_used),0) AS used FROM orders WHERE user_id=? AND status='DELIVERED'").bind(user.id).first();
-    const bonusUsed = Number(used?.used || 0);
+    const used = await env.DB.prepare("SELECT COALESCE(SUM(price_points),0) AS total, COALESCE(SUM(bonus_points_used),0) AS bonus FROM orders WHERE user_id=? AND status='DELIVERED'").bind(user.id).first();
+    const bonusUsed = Number(used?.bonus || 0), usedPoints = Number(used?.total || 0);
     try {
       const unavailable = await checkCapability(env, 'entitlement_query');
-      if (unavailable) return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+      if (unavailable) return json({ bonus_points: bonus, bonus_used: bonusUsed, used_points: usedPoints, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
       const result = await yirenfu(env, '/access', 'POST', { user_id: user.id });
-      if (!result.response.ok) return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+      if (!result.response.ok) return json({ bonus_points: bonus, bonus_used: bonusUsed, used_points: usedPoints, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
       const data = result.data;
       const onepay = data.requires_consumption
         ? (typeof data.remaining === 'number' && Number.isFinite(data.remaining) ? Math.max(0, data.remaining) : null)
         : 0;
       const spendable = onepay === null ? null : (data.access_granted === true ? onepay : 0);
-      return json({ ...data, bonus_points: bonus, bonus_used: bonusUsed, onepay_points: onepay, total_points: spendable === null ? null : bonus + spendable, upstream_available: true });
+      return json({ ...data, bonus_points: bonus, bonus_used: bonusUsed, used_points: usedPoints, onepay_points: onepay, total_points: spendable === null ? null : bonus + spendable, upstream_available: true });
     } catch {
-      return json({ bonus_points: bonus, bonus_used: bonusUsed, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
+      return json({ bonus_points: bonus, bonus_used: bonusUsed, used_points: usedPoints, onepay_points: null, total_points: null, upstream_available: false, upstream_message: '支付宝积分暂不可用' });
     }
   }
   if (path === '/api/purchase' && method === 'POST') return purchasePointsHandler(request, env);
@@ -1011,7 +1033,12 @@ async function route(request, env, ctx) {
   if (path === '/api/consumptions' && method === 'GET') {
     const user = await requireUser(request, env);
     const rows = await env.DB.prepare('SELECT idempotency_key,status,amount,reason,response_json,created_at FROM consumption_jobs WHERE user_id=? ORDER BY created_at DESC LIMIT 50').bind(user.id).all();
-    return json({ items: (rows.results || []).map(r => ({ ...r, response: JSON.parse(r.response_json || '{}'), response_json: undefined })) });
+    // One corrupt ledger row must not break the whole list.
+    return json({ items: (rows.results || []).map(r => {
+      let response = {};
+      try { response = JSON.parse(r.response_json || '{}'); } catch {}
+      return { ...r, response, response_json: undefined };
+    }) });
   }
 
   if (path.startsWith('/api/admin/')) {
@@ -1234,8 +1261,11 @@ async function route(request, env, ctx) {
     if (path === '/api/admin/storage' && method === 'GET') return json({ configured: Boolean(env.BUCKET), maxSize: MAX_UPLOAD_BYTES });
     if (path === '/api/admin/orders' && method === 'GET') {
       const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 50) || 50));
-      const rows = await env.DB.prepare(`SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC LIMIT ?`).bind(limit).all();
-      return json({ items: (rows.results || []).map(o => ({ ...orderView(o), user_id: o.user_id, email: o.user_email || '' })) });
+      const rawOffset = Number(url.searchParams.get('offset') || 0);
+      const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, Math.min(100000, rawOffset)) : 0;
+      const rows = await env.DB.prepare(`SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id=o.user_id ORDER BY o.created_at DESC, o.idempotency_key DESC LIMIT ? OFFSET ?`).bind(limit + 1, offset).all();
+      const items = (rows.results || []).map(o => ({ ...orderView(o), user_id: o.user_id, email: o.user_email || '' }));
+      return json({ items: items.slice(0, limit), has_more: items.length > limit, next_offset: offset + limit });
     }
 
     if (path === '/api/admin/capabilities' && method === 'GET') return relayUpstream(env, '/capabilities');

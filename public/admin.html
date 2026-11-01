@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261101-2">
+<link rel="stylesheet" href="/admin.css?v=20261101-3">
 </head>
 <body>
 
@@ -69,8 +69,8 @@
           <div class="statusbox"><b id="storageState">—</b><span>R2 文件存储</span></div>
         </div>
         <div class="actions">
-          <button class="btn" onclick="loadCapabilities()">读取 /capabilities</button>
-          <button class="btn secondary" onclick="loadProduct()">读取 /product</button>
+          <button class="btn" onclick="loadCapabilities(this)">读取 /capabilities</button>
+          <button class="btn secondary" onclick="loadProduct(this)">读取 /product</button>
         </div>
       </div>
       <div class="cols">
@@ -236,8 +236,9 @@
       <div class="panel">
         <div class="panel-title"><h2>成交订单</h2><button class="raw-trigger" data-raw-for="ordersOut" onclick="openRaw('ordersOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">积分兑换记录。仅「已交付」的订单会展示交付内容；订单交付内容为快照，修改商品不会影响已购用户。</p>
-        <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadOrders()">刷新订单</button></div>
+        <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadOrders(this)">刷新订单</button></div>
         <div id="ordersOut"><div class="state">正在加载订单…</div></div>
+        <button class="btn secondary hidden" id="ordersMore" type="button" onclick="loadOrders(this, true)" style="margin-top:12px">加载更多订单 ↓</button>
       </div>
     </section>
 
@@ -258,8 +259,8 @@
         <div class="panel-title"><h2>一人付充值套餐</h2><button class="raw-trigger" data-raw-for="plansOut" onclick="openRaw('plansOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">此处只读联调；积分套餐、价格与收费方式请在一人付项目控制台配置（收费方式需为积分 / 次数包）。</p>
         <div class="actions" style="margin:0 0 14px">
-          <button class="btn" onclick="loadCapabilities()">只读查询能力</button>
-          <button class="btn secondary" onclick="loadProduct()">只读查询产品</button>
+          <button class="btn" onclick="loadCapabilities(this)">只读查询能力</button>
+          <button class="btn secondary" onclick="loadProduct(this)">只读查询产品</button>
           <a class="btn secondary" href="https://ai6666.com/opcpay/console/" target="_blank" rel="noopener" style="text-decoration:none">打开一人付控制台 ↗</a>
         </div>
         <div id="plansOut" class="state">点击「只读查询产品」。</div>
@@ -272,9 +273,9 @@
         <div class="panel-title"><h2>购买与核销记录</h2><button class="raw-trigger" data-raw-for="recordsOut" onclick="openRaw('recordsOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">从平台列表读取记录；购买入口状态不等于支付成功。</p>
         <div class="actions" style="margin:0 0 12px">
-          <button class="btn" onclick="loadRecords('purchases')">购买入口记录</button>
-          <button class="btn secondary" onclick="loadRecords('consumptions')">正式核销记录</button>
-          <button class="btn secondary" onclick="loadRecords('events')">通知投递记录</button>
+          <button class="btn" onclick="loadRecords('purchases', this)">购买入口记录</button>
+          <button class="btn secondary" onclick="loadRecords('consumptions', this)">正式核销记录</button>
+          <button class="btn secondary" onclick="loadRecords('events', this)">通知投递记录</button>
         </div>
         <div class="state" id="recordsOut">尚未查询</div>
       </div>
@@ -332,7 +333,7 @@
         <div class="actions" style="margin-top:12px">
           <button class="btn" onclick="saveWebhook(true)">启用通知</button>
           <button class="btn secondary" onclick="saveWebhook(false)">停用通知</button>
-          <button class="btn secondary" onclick="loadWebhook()">读取状态</button>
+          <button class="btn secondary" onclick="loadWebhook(this)">读取状态</button>
           <button class="btn warn" onclick="rotateWebhook()">轮换签名密钥</button>
         </div>
         <div id="secretBox" class="secret hidden" style="margin-top:14px"></div>
@@ -352,7 +353,7 @@
         <div class="actions" style="margin-top:0">
           <button class="btn" onclick="saveApiKey()">保存 API Key</button>
           <button class="btn secondary" onclick="clearSecret('api-key')">清除并回退 Worker Secret</button>
-          <button class="btn secondary" onclick="loadCapabilities()">测试读取 /capabilities</button>
+          <button class="btn secondary" onclick="loadCapabilities(this)">测试读取 /capabilities</button>
         </div>
         <div class="state" id="apiKeyState" style="margin-top:12px">—</div>
       </div>
@@ -376,7 +377,7 @@
   </main>
 </div>
 
-<div class="dialog-backdrop hidden" id="bonusDialog" role="dialog" aria-modal="true" aria-labelledby="bonusTitle">
+<div class="dialog-backdrop hidden" id="bonusDialog" role="dialog" aria-modal="true" aria-labelledby="bonusTitle" tabindex="-1">
   <div class="dialog-card bonus-dialog">
     <div class="dialog-head"><div><span class="dialog-kicker">STORE CREDITS</span><h2 id="bonusTitle">调整赠送积分</h2></div><button class="dialog-close" onclick="closeDialog('bonusDialog')" aria-label="关闭">×</button></div>
     <p class="dialog-copy" id="bonusUser">—</p>
@@ -387,7 +388,7 @@
     <h3 class="history-title">最近变动</h3><div id="bonusHistory" class="state">正在读取…</div>
   </div>
 </div>
-<div class="dialog-backdrop hidden" id="rawDialog" role="dialog" aria-modal="true" aria-labelledby="rawTitle">
+<div class="dialog-backdrop hidden" id="rawDialog" role="dialog" aria-modal="true" aria-labelledby="rawTitle" tabindex="-1">
   <div class="dialog-card raw-dialog">
     <div class="dialog-head"><div><span class="dialog-kicker">READ ONLY · JSON</span><h2 id="rawTitle">查看原数据</h2></div><button class="dialog-close" onclick="closeDialog('rawDialog')" aria-label="关闭">×</button></div>
     <div class="code-window"><div class="code-toolbar"><span class="code-dots"><i></i><i></i><i></i></span><span>response.json</span><span class="code-readonly">只读</span></div><div id="rawEditor" class="raw-editor" aria-label="原始 JSON 数据"></div></div>
@@ -398,7 +399,7 @@
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 3200); }
+function toast(t) { const e = $('#toast'); e.textContent = t; e.setAttribute('role', 'status'); e.setAttribute('aria-live', 'polite'); e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 3200); }
 async function withBusy(button, task) {
   if (!button) return task();
   if (button.disabled) return;
@@ -529,7 +530,7 @@ let rawEditor = null, editorModule;
 async function openRaw(id) {
   if (!RAW.has(id)) return;
   const modal = $('#rawDialog'), host = $('#rawEditor');
-  modal.classList.remove('hidden'); document.body.classList.add('dialog-open');
+  openDialog('rawDialog');
   const value = JSON.stringify(RAW.get(id), null, 2);
   if (rawEditor) { rawEditor.dispose(); rawEditor = null; }
   host.innerHTML = '<div class="editor-loading">正在加载编辑器…</div>';
@@ -547,9 +548,37 @@ function closeDialog(id) {
   if (id === 'bonusDialog' && bonusPending) { toast('上次操作结果未知，请用原内容重试'); return; }
   $('#' + id).classList.add('hidden');
   if (id === 'rawDialog' && rawEditor) { rawEditor.dispose(); rawEditor = null; }
-  if (!document.querySelector('.dialog-backdrop:not(.hidden)')) document.body.classList.remove('dialog-open');
+  if (!document.querySelector('.dialog-backdrop:not(.hidden)')) {
+    document.body.classList.remove('dialog-open');
+    if (dialogLastFocus?.isConnected) dialogLastFocus.focus({ preventScroll: true });
+    dialogLastFocus = null;
+  }
 }
-document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeDialog('rawDialog'); closeDialog('bonusDialog'); } });
+let dialogLastFocus = null;
+function openDialog(id) {
+  dialogLastFocus = document.activeElement;
+  const modal = $('#' + id);
+  modal.classList.remove('hidden');
+  document.body.classList.add('dialog-open');
+  requestAnimationFrame(() => {
+    if (modal.classList.contains('hidden')) return;
+    const focusable = modal.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]');
+    (focusable || modal).focus({ preventScroll: true });
+  });
+}
+// Escape closes the top dialog; Tab is trapped inside it, matching the storefront modals.
+document.addEventListener('keydown', event => {
+  const open = [...document.querySelectorAll('.dialog-backdrop:not(.hidden)')].pop();
+  if (!open) return;
+  if (event.key === 'Escape') { event.preventDefault(); closeDialog(open.id); return; }
+  if (event.key !== 'Tab') return;
+  const focusable = [...open.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
+    .filter(node => node.getClientRects().length);
+  if (!focusable.length) { event.preventDefault(); open.focus({ preventScroll: true }); return; }
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !open.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (document.activeElement === last || !open.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+});
 function openRequestedEdit() {
   const requested = new URLSearchParams(location.search).get('edit');
   if (!requested || !/^[A-Za-z0-9_-]{1,64}$/.test(requested)) return;
@@ -557,16 +586,22 @@ function openRequestedEdit() {
   if (GOODS[requested]) editGoods(requested); else toast('未找到该商品，请在商品管理中搜索');
   history.replaceState(null, '', '/admin');
 }
-async function loadCapabilities() {
-  try { const d = await api('/api/admin/capabilities'); pretty($('#capabilities'), d); pretty($('#plansOut'), d); toast('已只读读取 /capabilities'); }
-  catch (e) { pretty($('#capabilities'), e.data || { error: e.message }); toast(e.message); }
+async function loadCapabilities(button) {
+  return withBusy(button, async () => {
+    try { const d = await api('/api/admin/capabilities'); pretty($('#capabilities'), d); pretty($('#plansOut'), d); toast('已只读读取 /capabilities'); }
+    catch (e) { pretty($('#capabilities'), e.data || { error: e.message }); toast(e.message); }
+  });
 }
-async function loadProduct() {
-  try { const d = await api('/api/admin/product'); pretty($('#product'), d); pretty($('#plansOut'), d); toast('已只读读取 /product'); }
-  catch (e) { pretty($('#product'), e.data || { error: e.message }); pretty($('#plansOut'), e.data || { error: e.message }); toast(e.message); }
+async function loadProduct(button) {
+  return withBusy(button, async () => {
+    try { const d = await api('/api/admin/product'); pretty($('#product'), d); pretty($('#plansOut'), d); toast('已只读读取 /product'); }
+    catch (e) { pretty($('#product'), e.data || { error: e.message }); pretty($('#plansOut'), e.data || { error: e.message }); toast(e.message); }
+  });
 }
-async function loadRecords(type) {
-  try { pretty($('#recordsOut'), await api('/api/admin/' + type)); } catch (e) { pretty($('#recordsOut'), e.data || { error: e.message }); toast(e.message); }
+async function loadRecords(type, button) {
+  return withBusy(button, async () => {
+    try { pretty($('#recordsOut'), await api('/api/admin/' + type)); } catch (e) { pretty($('#recordsOut'), e.data || { error: e.message }); toast(e.message); }
+  });
 }
 
 /* ---------- 分类管理 ---------- */
@@ -997,13 +1032,23 @@ async function deleteGoods(id) {
 }
 
 /* ---------- 订单 ---------- */
-async function loadOrders() {
-  try {
-    const d = await api('/api/admin/orders?limit=50');
-    rememberRaw('ordersOut', d);
-    ORDERS = d.items || [];
-    if (!ORDERS.length) { $('#ordersOut').innerHTML = '<div class="state">还没有成交订单。</div>'; return; }
-    $('#ordersOut').innerHTML = `<table><thead><tr>
+let orderNext = 0, orderSerial = 0;
+async function loadOrders(button, append = false) {
+  const serial = ++orderSerial, offset = append ? orderNext : 0;
+  return withBusy(button, async () => {
+    try {
+      const d = await api('/api/admin/orders?limit=50&offset=' + offset);
+      if (serial !== orderSerial) return;
+      rememberRaw('ordersOut', d);
+      const fresh = d.items || [];
+      if (append) {
+        const seen = new Set(ORDERS.map(o => o.key));
+        ORDERS = [...ORDERS, ...fresh.filter(o => !seen.has(o.key))];
+      } else ORDERS = fresh;
+      orderNext = d.next_offset ?? ORDERS.length;
+      $('#ordersMore').classList.toggle('hidden', !d.has_more);
+      if (!ORDERS.length) { $('#ordersOut').innerHTML = '<div class=\"state\">还没有成交订单。</div>'; return; }
+      $('#ordersOut').innerHTML = `<table><thead><tr>
       <th>订单号</th><th>商品</th><th>用户</th><th>积分</th><th>状态</th><th>时间</th>
     </tr></thead><tbody>${ORDERS.map(o => `<tr>
       <td class="mono" data-label="订单号">${esc(o.order_no)}</td>
@@ -1013,7 +1058,11 @@ async function loadOrders() {
       <td data-label="状态">${o.status === 'DELIVERED' ? '<span class="pill ok">已交付</span>' : o.status === 'PENDING' ? '<span class="pill wait">待确认</span>' : '<span class="pill bad">失败</span>'}</td>
       <td data-label="时间">${esc(fmt(o.created_at))}</td>
     </tr>`).join('')}</tbody></table>`;
-  } catch (e) { $('#ordersOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
+    } catch (e) {
+      if (serial !== orderSerial) return;
+      $('#ordersOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message);
+    }
+  });
 }
 
 /* ---------- 用户 ---------- */
@@ -1059,7 +1108,7 @@ async function openBonus(id) {
       toast('存在未确认的调整，请使用原内容重试');
     }
   } catch {}
-  $('#bonusDialog').classList.remove('hidden'); document.body.classList.add('dialog-open');
+  openDialog('bonusDialog');
   await loadBonus();
 }
 async function loadBonus() {
@@ -1342,7 +1391,11 @@ $('#agentTokens').addEventListener('click', async event => {
 });
 
 /* ---------- 通知 / 安全 ---------- */
-async function loadWebhook() { try { pretty($('#webhookState'), await api('/api/admin/webhook')); } catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); } }
+async function loadWebhook(button) {
+  return withBusy(button, async () => {
+    try { pretty($('#webhookState'), await api('/api/admin/webhook')); } catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); }
+  });
+}
 async function saveWebhook(enabled) {
   try { const d = await api('/api/admin/webhook', { method: 'PUT', body: JSON.stringify({ enabled }) }); pretty($('#webhookState'), d); if (d.secret) showSecret(d.secret); toast(enabled ? '通知已启用' : '通知已停用'); }
   catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); }

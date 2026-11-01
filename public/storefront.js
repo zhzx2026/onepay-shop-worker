@@ -21,6 +21,9 @@
       node = document.createElement('div');
       node.id = 'toast';
       node.className = 'toast';
+      // Assistive technology announces every toast without stealing focus.
+      node.setAttribute('role', 'status');
+      node.setAttribute('aria-live', 'polite');
       document.body.appendChild(node);
     }
     node.textContent = message;

@@ -257,3 +257,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width:760px) { .purchase-dialog { padding: 24px 19px; }.modal { padding: 12px; }.modal-dialog { max-height: 92vh; }.collection-card, .subscription-card { gap: 10px; padding: 13px; }.collection-icon, .subscription-icon { width: 40px; height: 40px; border-radius: 11px; font-size: 18px; }.collection-meta { gap: 3px 8px; }.file-output { flex-wrap: wrap; }.file-output .sbtn { margin-left: auto; }.series-entry { padding: 12px; } }
 .tree-children .tree-children .tree-children .tree-children { margin-left: 0; padding-left: 0; }
 .tree-folder summary:focus-visible, .catalog-controls button:focus-visible { outline: 3px solid rgba(112,88,207,.3); outline-offset: 2px; }
+
+/* Product detail modal: the full description buyers see before exchanging. */
+.detail-dialog { max-width: 560px; padding: 28px; }
+.detail-cover { height: 190px; margin: 0 0 16px; border-radius: 13px; overflow: hidden; }
+.detail-cover .product-cover { height: 190px; border-radius: 13px; }
+.detail-facts { display: grid; gap: 1px; overflow: hidden; margin: 14px 0; border: 1px solid var(--line); border-radius: 11px; background: var(--line); }
+.detail-facts > div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 13px; background: #fff; font-size: 12px; }
+.detail-facts span { flex: none; color: #99919e; }
+.detail-facts b { font-weight: 650; text-align: right; overflow-wrap: anywhere; }
+.detail-section { margin-top: 14px; }
+.detail-section-title { margin-bottom: 8px; color: #8c7f99; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+.detail-description { padding: 13px; border: 1px solid #eeeaf3; border-radius: 10px; background: #faf9fc; color: #6f6777; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.detail-empty { color: #aaa0ae; }
+.detail-dialog .purchase-actions { margin-top: 18px; }
+.detail-dialog .catalog-note { margin-bottom: 10px; }
+.detail-dialog .product-series { margin: 10px 0; }
+/* Card title doubles as the detail entry point. */
+.detail-trigger { display: block; width: 100%; margin: 0; padding: 0; background: none; color: inherit; font: inherit; line-height: inherit; text-align: left; cursor: pointer; }
+.detail-trigger:hover { color: #6d56c9; }
+.product-cover[data-detail] { cursor: pointer; }
+/* Sold-out marker on featured cards keeps its pill shape instead of overflowing the round arrow. */
+.soldout-pill { min-width: 32px; height: 32px; display: inline-flex; align-items: center; padding: 0 10px; border-radius: 99px; background: #faeeeb; color: var(--red); font-size: 10px; font-weight: 800; white-space: nowrap; }

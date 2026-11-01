@@ -85,7 +85,8 @@ export async function recordPairAttempt(env, rawIp) {
   const ip = /^[0-9a-f:.]{2,64}$/.test(value) ? value : 'unknown';
   const scope = 'ip:' + await digest('agent-pair-rate-v1:' + ip);
   const result = await env.DB.batch([
-    env.DB.prepare('DELETE FROM agent_pair_limits WHERE window_start<=?').bind(at - PAIR_TTL_SECONDS),
+    // Only reclaim this limiter's own scopes; other counters (login/register) have their own windows.
+    env.DB.prepare("DELETE FROM agent_pair_limits WHERE (scope LIKE 'ip:%' OR scope='global') AND window_start<=?").bind(at - PAIR_TTL_SECONDS),
     env.DB.prepare(`INSERT INTO agent_pair_limits(scope,window_start,attempts) VALUES(?,?,1)
       ON CONFLICT(scope) DO UPDATE SET attempts=attempts+1 WHERE attempts<?`).bind(scope, at, PAIR_IP_LIMIT),
     // Blocked clients do not consume the shared budget. Both counters are

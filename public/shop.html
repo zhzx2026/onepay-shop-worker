@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>全部商品 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -97,6 +97,28 @@
   </div>
 </div>
 
+<div class="modal" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+  <div class="modal-dialog detail-dialog">
+    <button class="modal-close" aria-label="关闭详情" onclick="Store.setModal('#detailModal', false)">×</button>
+    <div id="detailCover" class="detail-cover" aria-hidden="true"></div>
+    <div class="modal-kicker">PRODUCT DETAIL <span>✳</span></div>
+    <h2 id="detailTitle"></h2>
+    <p id="detailSummary"></p>
+    <div class="detail-facts" id="detailFacts"></div>
+    <div id="detailSeries"></div>
+    <div class="detail-section hidden" id="detailCatalogSection">
+      <div class="catalog-controls"><span>资源目录</span><div><button type="button" onclick="toggleDetailCatalog(true)">全部展开</button><button type="button" onclick="toggleDetailCatalog(false)">全部收起</button></div></div>
+      <div class="catalog-note">仅展示管理员审核的名称快照，目录可能不完整或随资源更新；下载链接不会在此公开。</div>
+      <div class="catalog-list catalog-tree" id="detailCatalog"></div>
+    </div>
+    <div class="detail-section"><div class="detail-section-title">商品详情</div><div class="detail-description" id="detailDescription"></div></div>
+    <div class="purchase-actions">
+      <button class="sbtn" type="button" onclick="Store.setModal('#detailModal', false)">关闭</button>
+      <button class="sbtn primary" id="detailBuy" type="button">立即兑换 <span aria-hidden="true">↗</span></button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="purchaseModal" role="dialog" aria-modal="true" aria-labelledby="purchaseTitle">
   <div class="modal-dialog purchase-dialog">
     <button class="modal-close" aria-label="关闭确认" onclick="Store.setModal('#purchaseModal', false)">×</button>
@@ -119,7 +141,7 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-1"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, query } = Store;
 let me = null, points = null, products = [], categories = [];
@@ -143,8 +165,10 @@ const state = {
   category: params.get('category') || '',
   tags: [...new Set(params.getAll('tag').map(tag => tag.trim().slice(0, 24)).filter(Boolean))].sort().slice(0, 8),
   q: params.get('q') || '',
-  sort: 'recommended'
+  sort: ['recommended', 'price-asc', 'price-desc', 'newest'].includes(params.get('sort')) ? params.get('sort') : 'recommended'
 };
+// 支持 /shop?product=prd_xxx 深链接：目录加载后自动打开该商品详情。
+let detailRequested = params.get('product') || '';
 
 const categoryById = id => categories.find(item => item.id === id);
 const categoryLabel = id => categoryById(id)?.name || '未分类';
@@ -159,6 +183,7 @@ function syncUrl() {
   if (state.category) next.set('category', state.category);
   state.tags.forEach(tag => next.append('tag', tag));
   if (state.q) next.set('q', state.q);
+  if (state.sort && state.sort !== 'recommended') next.set('sort', state.sort);
   history.replaceState(null, '', next.toString() ? `/shop?${next}` : '/shop');
 }
 
@@ -210,16 +235,17 @@ function renderProducts() {
     const series = product.product_kind === 'SUBSCRIPTION', sub = subscriptionFor(product.id);
     const owned = (library.owned_product_ids || []).includes(product.id);
     const viewOwned = me && libraryReady && ((series && sub && (sub.permanent || soldOut)) || (!series && owned && (!product.allow_repeat || soldOut)));
-    const label = checkingAccount ? '确认账户中' : (libraryFailed && me ? '重试账户状态' : (!me ? '登录后兑换' : soldOut ? '已售罄' : enough === false ? '积分不足' : series ? (sub ? '手动续订' : '订阅系列') : owned ? '再次兑换' : '立即兑换'));
+    const label = checkingAccount ? '确认账户中' : (libraryFailed && me ? '重试账户状态' : (!me ? '登录后兑换' : soldOut ? '已售罄' : enough === false ? '积分不足 · 去充值' : series ? (sub ? '手动续订' : '订阅系列') : owned ? '再次兑换' : '立即兑换'));
     const category = categoryLabel(product.category_id);
-    const cover = productCover(product, index);
+    const cover = productCover(product, index).replace('<div class="product-cover">',
+      `<div class="product-cover" data-detail="${esc(product.id)}" role="button" aria-label="查看 ${esc(product.title)} 详情">`);
     const subLabel = sub ? (sub.permanent ? '永久订阅' : (subscriptionActive(sub) ? '订阅中' : '已到期')) : '';
     const seriesInfo = series ? `<div class="product-series"><span>↻ 系列订阅</span><span>${Number(product.subscription_days) ? Number(product.subscription_days) + ' 天 · 手动续费' : '永久有效'}</span><span>${esc(frequencyLabel(product.update_frequency))}</span></div>` : '';
     return `<article class="product-card">
       ${cover}
       <div class="product-body">
         <div class="product-cat">${esc(category)} ${subLabel ? `<span class="owned-badge">${esc(subLabel)}</span>` : owned ? '<span class="owned-badge">已拥有</span>' : ''}</div>
-        <h3>${esc(product.title)}</h3>
+        <h3><button type="button" class="detail-trigger" data-detail="${esc(product.id)}">${esc(product.title)}</button></h3>
         <p class="summary">${esc(product.summary || '')}</p>
         ${seriesInfo}
         <div class="product-tags">${(product.tags || []).slice(0, 4).map(tag => `<button class="product-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div>
@@ -252,6 +278,11 @@ async function loadData(button, fresh = false) {
       products = productData.items || [];
       catalogLoaded = true;
       applyState();
+      // 深链接 /shop?product=…：目录就绪后自动打开一次商品详情。
+      if (detailRequested) {
+        const wanted = detailRequested; detailRequested = '';
+        if (products.some(item => item.id === wanted)) openDetail(wanted);
+      }
     } catch (error) {
       catalogLoaded = false;
       $('#productGrid').innerHTML = `<div class="empty-state"><b>商品读取失败</b>${esc(error.message)}</div>`;
@@ -368,6 +399,47 @@ function showCatalog(id) {
 }
 
 function toggleCatalog(open) { $$('#previewList details').forEach(node => { node.open = open; }); }
+function toggleDetailCatalog(open) { $$('#detailCatalog details').forEach(node => { node.open = open; }); }
+
+let detailTarget = '';
+function openDetail(id) {
+  const product = products.find(item => item.id === id); if (!product) return;
+  detailTarget = id;
+  const series = product.product_kind === 'SUBSCRIPTION';
+  const soldOut = product.stock !== null && product.stock !== undefined && Number(product.stock) <= 0;
+  const provider = product.provider?.label || '';
+  const facts = [
+    ['商品分类', categoryLabel(product.category_id)],
+    ['积分价格', Number(product.price_points) + ' 积分'],
+    ['库存', product.stock === null || product.stock === undefined ? '不限量' : soldOut ? '已售罄' : '剩余 ' + Number(product.stock)],
+    ['交付方式', product.delivery_label || '数字交付'],
+  ];
+  if (provider) facts.push(['资源来源', provider]);
+  if ((product.tags || []).length) facts.push(['标签', product.tags.join(' · ')]);
+  $('#detailTitle').textContent = product.title;
+  $('#detailSummary').textContent = product.summary || '';
+  $('#detailFacts').innerHTML = facts.map(([key, value]) => `<div><span>${esc(key)}</span><b>${esc(value)}</b></div>`).join('');
+  $('#detailSeries').innerHTML = series
+    ? `<div class="product-series"><span>↻ 系列订阅</span><span>${Number(product.subscription_days) ? Number(product.subscription_days) + ' 天 · 手动续费' : '永久有效'}</span><span>${esc(frequencyLabel(product.update_frequency))}</span></div><div class="notice-line">系列订阅一次兑换开通权益，不会自动扣费；有效期内可查看历史和新增更新。</div>`
+    : '';
+  $('#detailCover').innerHTML = productCover(product, 0);
+  const hasPreview = (product.preview_files || []).length > 0;
+  $('#detailCatalogSection').classList.toggle('hidden', !hasPreview);
+  if (hasPreview) $('#detailCatalog').innerHTML = catalogTreeHtml(product.preview_files);
+  const description = String(product.description || '').trim();
+  $('#detailDescription').innerHTML = description
+    ? esc(description).replace(/\n/g, '<br>')
+    : '<span class="detail-empty">暂无更多说明。</span>';
+  const buy = $('#detailBuy');
+  buy.disabled = Boolean(soldOut);
+  buy.textContent = soldOut ? '已售罄' : (series ? '订阅系列' : '立即兑换') + ' ↗';
+  setModal('#detailModal', true, '#detailBuy');
+}
+$('#detailBuy').addEventListener('click', () => {
+  const id = detailTarget; if (!id) return;
+  setModal('#detailModal', false);
+  buyProduct(id);
+});
 
 $('#categoryFilters').addEventListener('click', event => {
   const button = event.target.closest('[data-category]');
@@ -398,9 +470,11 @@ $('#productGrid').addEventListener('click', event => {
   const clear = event.target.closest('[data-clear]');
   const preview = event.target.closest('[data-preview]');
   const retry = event.target.closest('[data-retry-library]');
+  const detail = event.target.closest('[data-detail]');
   if (tag) toggleTag(tag.dataset.tag);
   else if (buy) buyProduct(buy.dataset.buy, buy);
   else if (preview) showCatalog(preview.dataset.preview);
+  else if (detail) openDetail(detail.dataset.detail);
   else if (retry) retryLibrary();
   else if (clear) clearFilter(clear.dataset.clear, clear.dataset.value);
 });
@@ -419,6 +493,7 @@ $('#sortSelect').addEventListener('change', event => {
   renderProducts();
 });
 $('#searchInput').value = state.q;
+$('#sortSelect').value = state.sort;
 $('#year').textContent = new Date().getFullYear();
 
 (async () => {
