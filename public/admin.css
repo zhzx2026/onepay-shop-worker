@@ -100,3 +100,36 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .nav-icon svg { display: block; width: 19px; height: 19px; flex: none; }
 @media (max-width: 760px) { .series-terms, .series-manager { padding: 15px; }.series-update-row { flex-wrap: wrap; }.series-update-row .row-actions { width: 100%; }.agent-steps { grid-template-columns: 1fr; }.agent-steps > div { padding: 11px; } }
 .checkline { display: inline-flex !important; align-items: center; gap: 7px; margin-top: 5px; color: #80758f; font-size: 11px; font-weight: 600; }.checkline input[type=checkbox] { width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: #7259c7; }
+
+/* Scoped styling for the Agent pairing controls. */
+.pair-card { margin: 20px 0 26px; padding: 22px; border: 1px solid #e7def6; border-radius: 15px; background: linear-gradient(135deg, #fcfaff, #f7f3ff); }
+.pair-heading { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 17px; }
+.pair-heading > div { min-width: 0; }
+.pair-heading h3, .agent-section-title h3 { margin: 0; color: #30283e; font-size: 15px; }
+.pair-heading p, .agent-section-title p { margin: 5px 0 0; color: #8b8194; font-size: 12px; line-height: 1.6; }
+.pair-label-field { max-width: 420px; margin-bottom: 14px; }.pair-label-field small { display: block; margin-top: 5px; color: #9b8ea8; font-size: 10px; }.pair-copy-fallback { margin-top: 14px; }
+.pair-icon { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; border-radius: 12px; background: #eae2fb; color: #795bcc; font-size: 21px; }
+.pair-result { margin-top: 18px; padding: 17px; border: 1px solid #e6def3; border-radius: 12px; background: #fff; }
+.pair-result-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pair-label { display: block; color: #94899f; font-size: 11px; }
+#pairCode { display: block; margin-top: 4px; color: #514092; font: 700 25px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; overflow-wrap: anywhere; user-select: all; }
+.pair-timer { padding: 6px 9px; border-radius: 7px; background: #f2edfc; color: #7158bd; font-size: 11px; font-weight: 750; }
+.pair-help { margin: 12px 0; color: #8e8497; font-size: 11px; line-height: 1.6; }
+.pair-feedback { margin-top: 13px; color: #8f839c; font-size: 11px; line-height: 1.6; }
+.pair-feedback.success { color: #558164; font-weight: 650; }
+.agent-section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 26px 0 12px; }
+.agent-token-list { display: grid; gap: 8px; }
+.agent-token-row { display: flex; align-items: center; gap: 12px; padding: 13px 15px; border: 1px solid #eee9f4; border-radius: 10px; }
+.agent-token-details { min-width: 0; flex: 1; }
+.agent-token-details b { color: #51465f; font-size: 12px; overflow-wrap: anywhere; }
+.agent-token-details small { display: block; margin-top: 3px; color: #9b91a3; font-size: 11px; overflow-wrap: anywhere; }
+.agent-token-state { flex: 0 0 auto; padding: 5px 8px; border-radius: 7px; background: #edf6ef; color: #66876d; font-size: 10px; font-weight: 700; }
+.agent-token-state.off { background: #f5f2f6; color: #9a909e; }
+#agentTokensMore { margin-top: 12px; }
+@media (max-width: 600px) {
+  .pair-card { padding: 16px; }
+  .pair-result { padding: 14px; }
+  #pairCode { font-size: 22px; letter-spacing: .08em; }
+  .agent-token-row { flex-wrap: wrap; }
+  .agent-token-details { flex: 1 1 65%; }
+}

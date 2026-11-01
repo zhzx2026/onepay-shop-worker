@@ -14,7 +14,7 @@ const sqliteTest = (name, fn) => test(name, { skip: !DatabaseSync && 'requires N
 async function makeDb({ beforeSubscriptionMigration = false } = {}) {
   const raw = new DatabaseSync(':memory:');
   const migrations = ['0001_init.sql', '0002_users_and_admin.sql', '0003_products_and_orders.sql', '0004_user_admin_roles.sql', '0005_categories_and_tags.sql', '0006_bonus_points.sql', '0007_catalog_agent.sql'];
-  if (!beforeSubscriptionMigration) migrations.push('0008_subscriptions_and_repeat.sql');
+  if (!beforeSubscriptionMigration) migrations.push('0008_subscriptions_and_repeat.sql', '0009_agent_pairing.sql');
   for (const name of migrations) {
     raw.exec(await readFile(new URL('../migrations/' + name, import.meta.url), 'utf8'));
   }
@@ -355,7 +355,7 @@ sqliteTest('agent tokens can only upload files and create idempotent hidden draf
     method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(body),
   });
   assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', {}, 'bad'), env)).status, 401);
-  assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', {}), { DB, BUCKET })).status, 503);
+  assert.equal((await worker.fetch(agentRequest('/api/agent/drafts', {}), { DB, BUCKET })).status, 401);
   assert.equal((await worker.fetch(agentRequest('/api/admin/products', {}), env)).status, 401);
   const form = new FormData(); form.append('file', new Blob(['hello file'], { type: 'text/plain' }), '课程.txt');
   const uploaded = await worker.fetch(new Request('https://example.test/api/agent/uploads', { method: 'POST', headers: { authorization: 'Bearer ' + secret }, body: form }), env);
