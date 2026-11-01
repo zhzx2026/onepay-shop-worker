@@ -77,7 +77,7 @@ npx wrangler login
 npx wrangler d1 create onepay-shop
 ```
 
-4. 应用全部数据库迁移（包含商品、订单、账号角色、赠送积分、目录快照、Agent 幂等记录、订阅权益与 Agent 配对）：
+4. 应用全部数据库迁移（包含商品、订单、账号角色、赠送积分、目录快照、Agent 幂等记录、订阅权益、目录扫描进度与 Agent 配对）：
 
 ```bash
 npx wrangler d1 migrations apply onepay-shop --remote
@@ -161,7 +161,7 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 2. 进入「商品管理」→「+ 上架新商品」。
 3. 填名称、积分价，选择交付方式：
    - 文本：把卡密 / 提取码 / 使用说明粘进「交付文本」。
-   - 链接：粘贴网盘分享链接（如 `https://pan.baidu.com/s/1…`）；夸克 / 百度会自动识别并尝试读取。可用提取码读取，失败可手工填写目录，检查无私密信息后保存。提取码输入框只用于读取；买家需要时，可在私密交付链接中附带 `?pwd=提取码`。
+   - 链接：粘贴网盘分享链接（如 `https://pan.baidu.com/s/1…`）；夸克 / 百度会自动识别并尝试读取。大目录会分成多批读取并显示进度条，每一批只消耗少量上游请求，避免单次请求中途失败；可用提取码读取，失败可手工填写目录，检查无私密信息后保存。提取码输入框只用于读取；买家需要时，可在私密交付链接中附带 `?pwd=提取码`。
    - 文件：点「上传文件」传到 R2，再填下载显示名。
 4. 普通商品默认不允许重复兑换，可在「重复购买」中单独开启；库存留空表示不限，状态选「上架」后保存。
 5. 回到前台 `/` 即可看到商品，登录用户用积分兑换。
@@ -221,7 +221,7 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | GET/DELETE | `/api/admin/agent/tokens[/:id]` | 列出、撤销已配对 Agent 的令牌，不返回明文 |
 | GET/POST/PUT/DELETE | `/api/admin/categories[/:id]` | 一级分类 / 二级子分类管理 |
 | POST | `/api/admin/upload` | 上传交付文件到 R2（multipart） |
-| POST | `/api/admin/netdisk/preview` | 管理员尝试读取公开分享目录，body `{ url, passcode? }`；仅返回文件名快照 |
+| POST | `/api/admin/netdisk/preview` | 管理员分批读取公开分享目录，body `{ url, passcode?, scan_id? }`；返回文件名快照、`done`、`progress` 与续读用 `scan_id`；大目录由前端循环调用直到完成 |
 | POST | `/api/admin/covers/generate` | 管理员手动生成封面，body `{ prompt }` |
 | GET | `/api/covers/:id` | 公开查看生成的封面，不提供商品文件访问 |
 | POST | `/api/agent/pair` | 用 10 位配对码换取 30 天 Agent Bearer 令牌（匿名、一次性、限流） |

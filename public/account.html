@@ -240,6 +240,13 @@ async function submitAuth(event) {
         method: 'POST',
         body: JSON.stringify({ email: $('#accountEmail').value, password: $('#accountPassword').value })
       });
+      // Some in-app browsers and private windows accept the login but drop the
+      // session cookie. Say so instead of silently bouncing back to this form.
+      const check = await api('/api/auth/me').catch(() => null);
+      if (!check || !check.authenticated) {
+        toast('登录成功，但浏览器没有保存登录状态：请关闭无痕模式、允许本站 Cookie 后重试');
+        return;
+      }
       toast(authMode === 'login' ? '登录成功' : '注册成功');
       location.href = nextUrl || '/account';
     } catch (error) {

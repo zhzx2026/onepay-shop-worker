@@ -1,11 +1,14 @@
 import { cachedPublicJson, invalidatePublicCache, withStaticCache, productTagFilters } from './cache.js';
-import { detectNetdisk, providerTags, normalizePreview, readShareDirectory } from './netdisk.js';
+import { detectNetdisk, providerTags, normalizePreview, sharePasscode, startShareScan, continueShareScan, scanSummary, SCAN_BATCH_CALLS } from './netdisk.js';
 import { bonusBalance, bonusHistory, adjustBonus, reserveOrder, refundOrder } from './bonus.js';
 import { SUBSCRIPTION_FREQUENCIES, validSubscriptionDays, isSubscriptionActive, finalizeSubscriptionOrder, subscriptionFor, subscriptionView, parseSubscriptionUpdate, subscriberUpdateView } from './subscriptions.js';
 import { pairingSchemaReady, issuePairCode, cancelPairCodes, pairCodeStatus, recordPairAttempt, exchangePairCode, validPairedAgent, listAgentTokens, revokeAgentToken } from './agent.js';
 
 const API = 'https://ai6666.com/opcpay/api/pay/v1';
 const encoder = new TextEncoder();
+// Session cookies are Secure; a plain-HTTP page would silently drop them and
+// make a successful login look like a failed one.
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 // Cloudflare Workers 的 WebCrypto 对 PBKDF2 迭代次数上限为 100000，超过会直接抛错。
 const PBKDF2_ITERATIONS = 100000;
 const DELIVERY_TYPES = new Set(['TEXT', 'LINK', 'FILE']);
@@ -41,7 +44,10 @@ async function passwordMatches(password, saved) {
     return constantEq(candidate.split('.')[2] || '', expected);
   } catch { return false; }
 }
-function cookie(name, value, maxAge) { return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`; }
+// SameSite=Lax still blocks cross-site form POSTs, but unlike Strict it keeps
+// the session when a user arrives from an external link, a QR code or an
+// in-app browser that treats the first navigation as cross-site.
+function cookie(name, value, maxAge) { return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`; }
 function getCookie(request, name) {
   const raw = request.headers.get('Cookie') || '';
   for (const part of raw.split(';')) { const [k, ...v] = part.trim().split('='); if (k === name) return v.join('='); }
@@ -1105,7 +1111,7 @@ async function route(request, env, ctx) {
     // The request is authenticated as an admin, and only fixed platform hosts are contacted.
     if (path === '/api/admin/netdisk/preview' && method === 'POST') {
       const body = await bodyJson(request);
-      try { return json({ ok: true, ...await readShareDirectory(body.url, body.passcode) }); }
+      try { return json({ ok: true, ...await netdiskPreview(env, body, admin) }); }
       catch (error) {
         return json({ error: error.message, error_code: 'NETDISK_PREVIEW_UNAVAILABLE', ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}) }, 422);
       }
@@ -1416,8 +1422,54 @@ async function purchasePointsHandler(request, env) {
   return json({ ...result, business_id: key });
 }
 
+// Batched, resumable public-share scan. The browser only holds an opaque scan
+// id; the share token/cookie stays in D1 and is dropped as soon as the scan
+// finishes or goes stale.
+async function netdiskPreview(env, body, admin) {
+  const target = detectNetdisk(body.url);
+  if (!target) throw new Error('仅支持夸克或百度网盘的 HTTPS 分享链接，请手动填写其他目录。');
+  const passcode = sharePasscode(body.url, body.passcode);
+  const requested = typeof body.scan_id === 'string' && /^nds_[A-Za-z0-9_-]{6,80}$/.test(body.scan_id) ? body.scan_id : '';
+  let scanKey = '', state = null;
+  if (requested) {
+    const row = await env.DB.prepare('SELECT state FROM netdisk_scans WHERE id=? AND owner=?').bind(requested, admin.id).first();
+    if (row?.state) {
+      try {
+        const saved = JSON.parse(row.state);
+        // A scan is only resumable for the same share the admin is looking at.
+        if (saved?.provider === target.id && saved?.shareId === target.shareId) { state = saved; scanKey = requested; }
+      } catch { state = null; }
+    }
+  }
+  if (!state) {
+    state = await startShareScan(body.url, passcode);
+    scanKey = id('nds_');
+    // Expired scans are never resumed; drop them so the table stays small.
+    await env.DB.prepare('DELETE FROM netdisk_scans WHERE updated_at < ?')
+      .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()).run().catch(() => {});
+  }
+  state = await continueShareScan(state, passcode, fetch, SCAN_BATCH_CALLS);
+  const summary = scanSummary(state);
+  if (state.done) {
+    await env.DB.prepare('DELETE FROM netdisk_scans WHERE id=?').bind(scanKey).run().catch(() => {});
+    return { ...summary, scan_id: '' };
+  }
+  const at = now();
+  await env.DB.prepare('INSERT INTO netdisk_scans(id,owner,state,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state, updated_at=excluded.updated_at')
+    .bind(scanKey, admin.id, JSON.stringify(state), at, at).run();
+  return { ...summary, scan_id: scanKey };
+}
+
 export default {
   async fetch(request, env, ctx) {
+    const requestUrl = new URL(request.url);
+    // Secure session cookies are rejected over plain HTTP, so a login would
+    // appear to succeed and then bounce straight back to the form. Land every
+    // public request on HTTPS first; 308 keeps POST bodies intact.
+    if (requestUrl.protocol === 'http:' && !LOCAL_HOSTS.has(requestUrl.hostname)) {
+      requestUrl.protocol = 'https:';
+      return Response.redirect(requestUrl.toString(), request.method === 'GET' || request.method === 'HEAD' ? 301 : 308);
+    }
     try {
       const response = await route(request, env, ctx);
       if (response) return response;

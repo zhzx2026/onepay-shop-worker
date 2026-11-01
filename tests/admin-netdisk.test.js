@@ -151,3 +151,18 @@ test('manually editing a partial directory retains the partial warning until exp
   await editor.context.saveGoods({});
   assert.equal(editor.saves[1].preview_truncated, false);
 });
+
+test('large directories are read in batches and keep the progress bar busy between them', async () => {
+  const editor = makeEditor(); begin(editor);
+  assert.equal(JSON.parse(editor.reads[0].options.body).scan_id, '');
+  editor.reads[0].resolve({ provider: { id: 'quark' }, items: ['第一页/'], truncated: false, done: false, scan_id: 'nds_batch1', progress: { percent: 40, pending: 3 } });
+  await flush();
+  assert.equal(editor.reads.length, 2);
+  assert.equal(JSON.parse(editor.reads[1].options.body).scan_id, 'nds_batch1');
+  assert.equal(editor.nodes.readCatalogButton.disabled, true);
+  editor.reads[1].resolve({ provider: { id: 'quark' }, items: ['第一页/', '第一页/文件.txt'], truncated: false, done: true, scan_id: '', progress: { percent: 100, pending: 0 } });
+  await flush();
+  assert.equal(editor.nodes.pPreview.value, '第一页/\n第一页/文件.txt');
+  assert.match(editor.nodes.catalogStatus.textContent, /已读取 2 项/);
+  assert.equal(editor.nodes.readCatalogButton.disabled, false);
+});

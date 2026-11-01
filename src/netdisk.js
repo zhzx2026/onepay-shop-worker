@@ -1,9 +1,9 @@
 // Public-share adapters. These endpoints are unofficial and may be blocked or
 // change without notice. Never fetch a user-supplied URL or follow redirects.
-export const MAX_PREVIEW_FILES = 150;
+export const MAX_PREVIEW_FILES = 300;
 const QUARK_PAGE_SIZE = 50;
 const BAIDU_PAGE_SIZE = 100;
-const MAX_LIST_CALLS = 12;
+const MAX_LIST_CALLS = 150;
 const MAX_DEPTH = 4; // root and up to three child levels (plus a single Quark wrapper)
 const MAX_PREVIEW_PATH = 320;
 const MAX_JSON_BYTES = 1024 * 1024;
@@ -90,8 +90,11 @@ async function requestJson(url, options, fetcher, provider, stage) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetcher(url, { ...options, redirect: 'error', signal: controller.signal });
+    const response = await fetcher(url, { ...options, redirect: 'manual', signal: controller.signal });
     const status = response.status;
+    // Workers fetch does not support redirect: 'error'. Keep redirects closed
+    // by refusing every 3xx response instead of following challenge pages.
+    if (status >= 300 && status < 400) throw new UpstreamError(provider, stage, 'HTTP_ERROR', { httpStatus: status });
     if (!response.body) throw new UpstreamError(provider, stage, response.ok ? 'INVALID_RESPONSE' : 'HTTP_ERROR', { httpStatus: status });
     const reader = response.body.getReader();
     const chunks = []; let size = 0;
@@ -161,62 +164,162 @@ function providerError(provider, error) {
   });
 }
 
-export async function readShareDirectory(value, passcode = '', fetcher = fetch) {
+/* ---------------- 目录扫描：可续读的分批状态机 ---------------- */
+
+// One Worker invocation has a hard cap on outbound subrequests (the free plan
+// stops at 50), and a scan that reaches it loses the folder in flight. Keep
+// each batch well below that ceiling; the admin page just asks for the next
+// batch until `done` is true.
+export const SCAN_BATCH_CALLS = 20;
+
+export function sharePasscode(value, passcode = '') {
+  const provider = detectNetdisk(value);
+  const pwd = String(passcode || provider?.password || '').trim();
+  return /^[A-Za-z0-9]{1,16}$/.test(pwd) ? pwd : '';
+}
+
+function isDirectory(item) {
+  return item?.dir === true || item?.dir === 1 || item?.dir === '1' || item?.file_type === 0 || item?.file_type === '0';
+}
+
+function scanEntry(item) {
+  return { name: item?.file_name, directory: isDirectory(item), ref: item?.fid };
+}
+
+function newScanState(provider, initialRef, extra = {}) {
+  return {
+    v: 1,
+    provider: provider.id,
+    label: provider.label,
+    shareId: provider.shareId,
+    initialRef,
+    queue: [{ ref: initialRef, prefix: '', depth: 0, page: 1 }],
+    items: [],
+    calls: 0,
+    attempts: 0,
+    pages: 0,
+    truncated: false,
+    warning: null,
+    done: false,
+    stoken: '',
+    cookie: '',
+    host: '',
+    skill: false,
+    ...extra,
+  };
+}
+
+function processPage(state, current, page, makeChild) {
+  const entries = Array.isArray(page?.entries) ? page.entries : [];
+  // Quark can wrap the share in a single top-level folder, whereas its web
+  // page starts inside it. Keep the name for context but do not spend a
+  // preview depth on that wrapping layer.
+  const wrappedRoot = state.expandSingleRoot && current.depth === 0 && current.ref === state.initialRef && current.page === 1 && !page.hasMore && entries.length === 1 && entries[0].directory;
+  const childDepth = wrappedRoot ? 0 : current.depth + 1;
+  const seen = new Set(state.items);
+  for (const entry of entries) {
+    const name = safeName(entry.name);
+    if (!name) { state.truncated = true; continue; }
+    const path = `${current.prefix}${name}${entry.directory ? '/' : ''}`;
+    if (path.length > MAX_PREVIEW_PATH) { state.truncated = true; continue; }
+    if (!seen.has(path)) { seen.add(path); state.items.push(path); }
+    if (entry.directory) {
+      if (childDepth < MAX_DEPTH) {
+        const ref = makeChild(entry);
+        if (ref) state.queue.push({ ref, prefix: path, depth: childDepth, page: 1 });
+        else state.truncated = true;
+      } else state.truncated = true;
+    }
+    if (state.items.length >= MAX_PREVIEW_FILES) { state.truncated = true; break; }
+  }
+}
+
+function finishScan(state) {
+  const limited = state.calls >= MAX_LIST_CALLS || state.attempts >= MAX_LIST_CALLS || state.items.length >= MAX_PREVIEW_FILES;
+  if (!state.queue.length || limited) state.done = true;
+  if (state.queue.length && limited) state.truncated = true;
+}
+
+async function runBatch(state, ctx, budget) {
+  let used = 0;
+  while (state.queue.length && used < budget && state.calls < MAX_LIST_CALLS && state.attempts < MAX_LIST_CALLS && state.items.length < MAX_PREVIEW_FILES) {
+    const current = state.queue.shift();
+    let page;
+    try { page = await ctx.list(current); state.calls++; if (!page.cached) used++; }
+    catch (error) {
+      if (!state.calls) throw error;
+      // A single folder can hit a transient provider/network failure. Retry
+      // it once after the rest of the queue so one bad folder does not hide
+      // every sibling that follows it.
+      if (!current.retry) {
+        state.queue.push({ ...current, retry: 1 });
+        continue;
+      }
+      state.truncated = true;
+      const safe = providerError(ctx.provider, error);
+      state.warning = { message: safe.message, diagnostic: safe.diagnostic };
+      continue;
+    }
+    processPage(state, current, page, ctx.makeChild);
+    state.pages++;
+    // Fetch the remaining pages of this folder before consuming the bounded
+    // request budget on child folders.
+    if (page.hasMore) state.queue.unshift({ ...current, page: current.page + 1 });
+  }
+  finishScan(state);
+}
+
+export function scanSummary(state) {
+  const pending = state.queue.length;
+  const percent = state.done ? 100 : Math.max(1, Math.min(99, Math.round((state.pages / Math.max(state.pages + pending, 1)) * 100)));
+  return {
+    provider: { id: state.provider, label: state.label },
+    items: state.items,
+    truncated: Boolean(state.truncated),
+    done: Boolean(state.done),
+    progress: { items: state.items.length, pages: state.pages, pending, percent },
+    ...(state.warning ? { warning: state.warning } : {}),
+  };
+}
+
+export async function startShareScan(value, passcode = '', fetcher = fetch) {
   const provider = detectNetdisk(value);
   if (!provider) throw new Error('仅支持夸克或百度网盘的 HTTPS 分享链接，请手动填写其他目录。');
   const pwd = String(passcode || provider.password || '').trim();
   if (pwd && !/^[A-Za-z0-9]{1,16}$/.test(pwd)) throw new Error('提取码格式无效，请填写 1–16 位字母或数字。');
   try {
     return provider.id === 'quark'
-      ? await quarkDirectory(provider, pwd, fetcher)
-      : await baiduDirectory(provider, pwd, fetcher);
+      ? await startQuarkScan(provider, pwd, fetcher)
+      : await startBaiduScan(provider, pwd, fetcher);
   } catch (error) {
     throw providerError(provider, error);
   }
 }
 
-async function collectDirectory(provider, initial, list, makeChild, { expandSingleRoot = false } = {}) {
-  const queue = [{ ref: initial, prefix: '', depth: 0, page: 1 }];
-  const seen = new Set(); const items = [];
-  let calls = 0, truncated = false, warning = null;
-  while (queue.length && calls < MAX_LIST_CALLS && items.length < MAX_PREVIEW_FILES) {
-    const current = queue.shift();
-    let page;
-    try { page = await list(current); calls++; }
-    catch (error) {
-      if (!calls) throw error;
-      truncated = true;
-      const safe = providerError(provider, error);
-      warning = { message: safe.message, diagnostic: safe.diagnostic };
-      break;
-    }
-    const entries = page.entries;
-    // Quark can wrap the share in a single top-level folder, whereas its web
-    // page starts inside it. Keep the name for context but do not spend a
-    // preview depth on that wrapping layer.
-    const wrappedRoot = expandSingleRoot && current.depth === 0 && current.ref === initial && current.page === 1 && !page.hasMore && entries.length === 1 && entries[0].directory;
-    const childDepth = wrappedRoot ? 0 : current.depth + 1;
-    for (const entry of entries) {
-      const name = safeName(entry.name);
-      if (!name) { truncated = true; continue; }
-      const path = `${current.prefix}${name}${entry.directory ? '/' : ''}`;
-      if (path.length > MAX_PREVIEW_PATH) { truncated = true; continue; }
-      if (!seen.has(path)) { seen.add(path); items.push(path); }
-      if (entry.directory) {
-        if (childDepth < MAX_DEPTH) {
-          const ref = makeChild(entry);
-          if (ref) queue.push({ ref, prefix: path, depth: childDepth, page: 1 });
-          else truncated = true;
-        } else truncated = true;
-      }
-      if (items.length >= MAX_PREVIEW_FILES) { truncated = true; break; }
-    }
-    // Fetch the remaining pages of this folder before consuming the bounded
-    // request budget on child folders.
-    if (page.hasMore) queue.unshift({ ...current, page: current.page + 1 });
+export async function continueShareScan(state, passcode = '', fetcher = fetch, budget = SCAN_BATCH_CALLS) {
+  if (!state || state.done) return state;
+  const provider = { id: state.provider, label: state.label || '网盘', shareId: state.shareId };
+  const limit = Number.isFinite(Number(budget)) ? Math.max(1, Math.min(MAX_LIST_CALLS, Math.floor(Number(budget)))) : SCAN_BATCH_CALLS;
+  try {
+    const ctx = state.provider === 'quark'
+      ? quarkContext(provider, passcode, fetcher, state)
+      : baiduContext(provider, passcode, fetcher, state);
+    await runBatch(state, ctx, limit);
+    return state;
+  } catch (error) {
+    throw providerError(provider, error);
   }
-  if (queue.length) truncated = true;
-  return { provider: { id: provider.id, label: provider.label }, items, truncated, ...(warning ? { warning } : {}) };
+}
+
+// Full scan kept for scripts and tests; the admin endpoint drives the batched
+// functions above so one HTTP request never has to read a whole large share.
+export async function readShareDirectory(value, passcode = '', fetcher = fetch) {
+  // Validate the raw passcode first; the derived one is reused across batches.
+  let state = await startShareScan(value, passcode, fetcher);
+  const pwd = sharePasscode(value, passcode);
+  let rounds = 0;
+  while (!state.done && rounds++ < 12) state = await continueShareScan(state, pwd, fetcher, MAX_LIST_CALLS);
+  return scanSummary(state);
 }
 
 function nonnegativeInteger(value) {
@@ -244,7 +347,7 @@ function betterError(first, next) {
   return !first || score(next) >= score(first) ? next : first;
 }
 
-async function quarkDirectory(provider, passcode, fetcher) {
+function quarkContext(provider, passcode, fetcher, state) {
   const legacyQuery = { pr: 'ucpro', fr: 'pc', uc_param_str: '', ver: '2' };
   // The Skill's guest transport uses this literal placeholder, not an account
   // access token. Do not substitute an account credential or forward cookies.
@@ -256,15 +359,15 @@ async function quarkDirectory(provider, passcode, fetcher) {
     'referer': 'https://pan.quark.cn/',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
   };
-  let preferredHost = QUARK_HOSTS[0], listAttempts = 0;
   const validToken = value => typeof value === 'string' && value.length > 0 && value.length <= 1024;
   async function call(path, params, options, stage) {
     let best = null;
-    const hosts = [preferredHost, ...QUARK_HOSTS.filter(host => host !== preferredHost)];
+    const preferred = state.host || QUARK_HOSTS[0];
+    const hosts = [preferred, ...QUARK_HOSTS.filter(host => host !== preferred)];
     for (const host of hosts) {
       if (stage === 'DETAIL') {
-        if (listAttempts >= MAX_LIST_CALLS) throw best || new UpstreamError(provider.id, stage, 'LIST_LIMIT');
-        listAttempts++;
+        if (state.attempts >= MAX_LIST_CALLS) throw best || new UpstreamError(provider.id, stage, 'LIST_LIMIT');
+        state.attempts++;
       }
       const url = new URL(`https://${host}${QUARK_PATH}${path}`);
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
@@ -276,7 +379,7 @@ async function quarkDirectory(provider, passcode, fetcher) {
         } else if (!Array.isArray(result.data?.data?.list)) {
           throw new UpstreamError(provider.id, stage, 'INVALID_RESPONSE', { httpStatus: result.status });
         }
-        preferredHost = host;
+        state.host = host;
         return result;
       } catch (error) {
         best = betterError(best, error);
@@ -296,8 +399,8 @@ async function quarkDirectory(provider, passcode, fetcher) {
   async function skillRoot() {
     let best = null;
     for (const host of ['drive-pc.quark.cn', 'drive-h.quark.cn']) {
-      if (listAttempts >= MAX_LIST_CALLS) throw best || new UpstreamError(provider.id, 'TOKEN', 'LIST_LIMIT');
-      listAttempts++;
+      if (state.attempts >= MAX_LIST_CALLS) throw best || new UpstreamError(provider.id, 'TOKEN', 'LIST_LIMIT');
+      state.attempts++;
       const url = new URL(`https://${host}${QUARK_PATH}v2/detail`);
       for (const [key, value] of Object.entries(skillQuery())) url.searchParams.set(key, value);
       try {
@@ -311,7 +414,7 @@ async function quarkDirectory(provider, passcode, fetcher) {
         if (!Array.isArray(list) || (token != null && token !== '' && !validToken(token))) {
           throw new UpstreamError(provider.id, 'TOKEN', 'INVALID_RESPONSE', { httpStatus: result.status });
         }
-        preferredHost = host;
+        state.host = host;
         return { result, list, token: token || '' };
       } catch (error) {
         best = betterError(best, error);
@@ -319,42 +422,54 @@ async function quarkDirectory(provider, passcode, fetcher) {
     }
     throw best || new UpstreamError(provider.id, 'TOKEN', 'INVALID_RESPONSE');
   }
-  let firstPage = null, stoken = '';
-  try {
-    firstPage = await skillRoot();
-    stoken = firstPage.token;
-  } catch (skillError) {
-    // Keep the previous public-share token flow as a compatibility fallback.
-    try { stoken = await legacyToken(); }
-    catch (legacyError) { throw betterError(skillError, legacyError); }
-  }
-  return collectDirectory(provider, '0', async current => {
-    const root = current.ref === '0';
-    let response, list;
-    if (firstPage && root && current.page === 1) {
-      ({ result: response, list } = firstPage);
-    } else {
-      // A valid first page need not contain a token. Fetch one only if a
-      // subsequent page/folder actually has to be read; otherwise keep the page.
-      if (!stoken) stoken = await legacyToken();
-      const params = firstPage
-        ? { ...skillQuery(), pwd_id: provider.shareId, stoken, pdir_fid: current.ref, _page: String(current.page), _size: String(QUARK_PAGE_SIZE), _fetch_total: '1', _fetch_share: '1' }
-        : { ...legacyQuery, pwd_id: provider.shareId, stoken, pdir_fid: current.ref, force: '0', _page: String(current.page), _size: String(QUARK_PAGE_SIZE), _fetch_banner: root ? '1' : '0', _fetch_share: root ? '1' : '0', fetch_relate_conversation: '0', _fetch_total: '1', _sort: 'file_type:asc,file_name:asc' };
-      response = await call('detail', params, { headers }, 'DETAIL');
-      list = response.data.data.list;
+  async function list(current) {
+    // The root page came back with the Skill guest handshake; reuse it once
+    // instead of spending another upstream request.
+    if (state.rootPage && current.ref === '0' && current.page === 1) {
+      const page = state.rootPage;
+      delete state.rootPage;
+      return { ...page, cached: true };
     }
-    return {
-      entries: list.map(item => ({ name: item?.file_name, directory: item?.dir === true || item?.dir === 1 || item?.dir === '1' || item?.file_type === 0 || item?.file_type === '0', ref: item?.fid })),
-      hasMore: quarkHasMore(response, list, current.page),
-    };
-  }, entry => /^[A-Za-z0-9_-]{1,128}$/.test(String(entry.ref || '')) ? entry.ref : null, { expandSingleRoot: true });
+    // A valid first page need not contain a token. Fetch one only if a
+    // subsequent page/folder actually has to be read; otherwise keep the page.
+    if (!state.stoken) state.stoken = await legacyToken();
+    const root = current.ref === '0';
+    const params = state.skill
+      ? { ...skillQuery(), pwd_id: provider.shareId, stoken: state.stoken, pdir_fid: current.ref, _page: String(current.page), _size: String(QUARK_PAGE_SIZE), _fetch_total: '1', _fetch_share: '1' }
+      : { ...legacyQuery, pwd_id: provider.shareId, stoken: state.stoken, pdir_fid: current.ref, force: '0', _page: String(current.page), _size: String(QUARK_PAGE_SIZE), _fetch_banner: root ? '1' : '0', _fetch_share: root ? '1' : '0', fetch_relate_conversation: '0', _fetch_total: '1', _sort: 'file_type:asc,file_name:asc' };
+    const response = await call('detail', params, { headers }, 'DETAIL');
+    const rows = response.data.data.list;
+    return { entries: rows.map(scanEntry), hasMore: quarkHasMore(response, rows, current.page) };
+  }
+  return {
+    provider, list, skillRoot, legacyToken,
+    makeChild: entry => /^[A-Za-z0-9_-]{1,128}$/.test(String(entry.ref || '')) ? entry.ref : null,
+  };
 }
 
-async function baiduDirectory(provider, passcode, fetcher) {
+async function startQuarkScan(provider, passcode, fetcher) {
+  const state = newScanState(provider, '0', { expandSingleRoot: true });
+  const ctx = quarkContext(provider, passcode, fetcher, state);
+  let first = null;
+  try {
+    first = await ctx.skillRoot();
+    state.stoken = first.token;
+    state.skill = true;
+  } catch (skillError) {
+    // Keep the previous public-share token flow as a compatibility fallback.
+    try { state.stoken = await ctx.legacyToken(); state.skill = false; }
+    catch (legacyError) { throw betterError(skillError, legacyError); }
+  }
+  if (first) {
+    state.rootPage = { entries: first.list.map(scanEntry), hasMore: quarkHasMore(first.result, first.list, 1) };
+  }
+  return state;
+}
+
+function baiduContext(provider, passcode, fetcher, state) {
   const headers = { 'accept': 'application/json', 'referer': 'https://pan.baidu.com/' };
   const common = { web: '5', app_id: '250528', channel: 'chunlei', clienttype: '5' };
-  let cookie = '';
-  if (passcode) {
+  async function verify() {
     const url = new URL('https://pan.baidu.com/share/verify');
     for (const [key, value] of Object.entries({ ...common, surl: provider.shareId })) url.searchParams.set(key, value);
     const result = await requestJson(url.toString(), {
@@ -365,16 +480,30 @@ async function baiduDirectory(provider, passcode, fetcher) {
     const setCookies = typeof result.headers.getSetCookie === 'function' ? result.headers.getSetCookie().join(', ') : (result.headers.get('set-cookie') || '');
     const match = setCookies.match(/(?:^|,\s*)BDCLND=([^;,\s]+)/i);
     if (!match) throw new UpstreamError(provider.id, 'VERIFY', 'INVALID_RESPONSE', { httpStatus: result.status });
-    cookie = `BDCLND=${match[1]}`;
+    return `BDCLND=${match[1]}`;
   }
-  return collectDirectory(provider, '', async current => {
+  async function list(current) {
+    // The transient share cookie is kept in the server-side scan state only,
+    // so a later batch never has to re-verify the passcode.
+    if (passcode && !state.cookie) state.cookie = await verify();
     const url = new URL('https://pan.baidu.com/share/list');
     const params = { ...common, shorturl: provider.shareId, page: String(current.page), num: String(BAIDU_PAGE_SIZE), order: 'time', desc: '1', showempty: '0' };
     if (current.ref) params.dir = current.ref; else params.root = '1';
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-    const result = await requestJson(url.toString(), { headers: cookie ? { ...headers, cookie } : headers }, fetcher, provider.id, 'DETAIL');
+    const result = await requestJson(url.toString(), { headers: state.cookie ? { ...headers, cookie: state.cookie } : headers }, fetcher, provider.id, 'DETAIL');
     checkProviderCode(result, provider.id, 'DETAIL', 'errno', true);
     if (!Array.isArray(result.data?.list)) throw new UpstreamError(provider.id, 'DETAIL', 'INVALID_RESPONSE', { httpStatus: result.status });
     return { entries: result.data.list.map(item => ({ name: item.server_filename, directory: Number(item.isdir) === 1, ref: item.path })), hasMore: result.data.list.length >= BAIDU_PAGE_SIZE };
-  }, entry => typeof entry.ref === 'string' && entry.ref.startsWith('/') && entry.ref.length <= 500 ? entry.ref : null);
+  }
+  return {
+    provider, list, verify,
+    makeChild: entry => typeof entry.ref === 'string' && entry.ref.startsWith('/') && entry.ref.length <= 500 ? entry.ref : null,
+  };
+}
+
+async function startBaiduScan(provider, passcode, fetcher) {
+  const state = newScanState(provider, '');
+  const ctx = baiduContext(provider, passcode, fetcher, state);
+  if (passcode) state.cookie = await ctx.verify();
+  return state;
 }
