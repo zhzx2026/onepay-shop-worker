@@ -21,6 +21,9 @@
       node = document.createElement('div');
       node.id = 'toast';
       node.className = 'toast';
+      // Announced by screen readers; the visual toast alone is invisible to them.
+      node.setAttribute('role', 'status');
+      node.setAttribute('aria-live', 'polite');
       document.body.appendChild(node);
     }
     node.textContent = message;
@@ -207,13 +210,33 @@
     return render(root) || '<div class="tree-empty">暂无目录</div>';
   }
 
-  async function copyText(text) {
+  // navigator.clipboard only exists in secure contexts, and some in-app browsers
+  // reject it anyway. Fall back to a temporary textarea so the copy button still
+  // works on plain-HTTP previews and older WebViews.
+  function legacyCopy(text) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+    document.body.appendChild(area);
     try {
-      await navigator.clipboard.writeText(text);
-      toast('已复制');
-    } catch {
-      toast('复制失败，请手动选择文本');
-    }
+      area.select();
+      return document.execCommand('copy');
+    } catch { return false; }
+    finally { area.remove(); }
+  }
+
+  async function copyText(text) {
+    const value = String(text ?? '');
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        toast('已复制');
+        return;
+      }
+    } catch { /* Fall through to the legacy path. */ }
+    if (legacyCopy(value)) toast('已复制');
+    else toast('复制失败，请手动选择文本');
   }
 
   document.addEventListener('click', event => {
@@ -222,9 +245,24 @@
     copyText(button.dataset.copy || '');
   });
 
+  // crypto.randomUUID() only exists in secure contexts; keep idempotency keys
+  // working when the shop is previewed over plain http (LAN / tunnel).
+  function uuid() {
+    if (globalThis.crypto?.randomUUID) {
+      try { return crypto.randomUUID(); } catch { /* Fall through. */ }
+    }
+    const bytes = new Uint8Array(16);
+    if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(bytes);
+    else for (let index = 0; index < 16; index++) bytes[index] = Math.floor(Math.random() * 256);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
   function query() {
     return new URLSearchParams(location.search);
   }
 
-  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, copyText, query };
+  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, copyText, query, uuid };
 })();

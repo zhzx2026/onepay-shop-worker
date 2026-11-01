@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>个人中心 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-2">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -74,8 +74,8 @@
 
     <div class="stats">
       <div class="stat"><span>当前积分 <i>✳</i></span><b id="statPoints">—</b><small id="pointsBreakdown">正在读取积分来源</small></div>
-      <div class="stat"><span>已使用积分 <i>↗</i></span><b id="statUsed">—</b><small>累计兑换所用积分</small></div>
-      <div class="stat"><span>已购记录 <i>♡</i></span><b id="statOrders">—</b><small>最近 50 笔中的已交付订单</small></div>
+      <div class="stat"><span>已使用积分 <i>↗</i></span><b id="statUsed">—</b><small id="pointsUsedNote">累计兑换所用积分</small></div>
+      <div class="stat"><span>已购记录 <i>♡</i></span><b id="statOrders">—</b><small>累计已交付订单</small></div>
     </div>
 
     <div>
@@ -180,7 +180,7 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-2"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
 let me = null, points = null, authMode = 'login';
@@ -265,11 +265,16 @@ async function loadAccess() {
     const data = await api('/api/access');
     const bonus = Number(data.bonus_points || 0);
     points = Number.isFinite(data.total_points) ? data.total_points : null;
-    $('#statPoints').textContent = points === null ? (bonus ? bonus + ' + ?' : '—') : points;
+    $('#statPoints').textContent = points === null ? (bonus ? String(bonus) : '—') : points;
     $('#pointsBreakdown').textContent = data.upstream_available
       ? `店铺赠送 ${bonus} · 支付宝 ${data.onepay_points === null ? '未知' : Number(data.onepay_points || 0)}${data.access_granted === false && data.onepay_points ? '（当前不可用）' : ''}`
       : `店铺赠送 ${bonus} · 支付宝积分暂不可用`;
-    $('#statUsed').textContent = Number.isFinite(data.used) ? data.used + Number(data.bonus_used || 0) : (data.bonus_used ? data.bonus_used + ' + ?' : '—');
+    // used_points is the total spend of delivered orders. The old code added an
+    // unknown provider part and printed "10 + ?", which looked like a hidden charge.
+    const usedPoints = Number.isFinite(data.used_points) ? data.used_points : (Number.isFinite(data.used) ? data.used : null);
+    $('#statUsed').textContent = usedPoints === null ? '—' : usedPoints;
+    $('#pointsUsedNote').textContent = usedPoints === null ? '累计兑换所用积分'
+      : `其中店铺赠送 ${Number(data.bonus_used || 0)} 积分`;
     setPoints(points);
   } catch (error) {
     points = null;
@@ -319,7 +324,7 @@ async function buyPoints(sku, button) {
     try {
       const data = await api('/api/purchase', {
         method: 'POST',
-        body: JSON.stringify({ idempotency_key: 'buy-' + crypto.randomUUID(), sku_id: sku })
+        body: JSON.stringify({ idempotency_key: 'buy-' + Store.uuid(), sku_id: sku })
       });
       if (data.status === 'READY' && data.purchase_url) {
         $('#payDetails').innerHTML = `<div><b>${esc(data.charging_option?.display_name || '积分充值')}</b></div>
@@ -348,7 +353,10 @@ async function loadOrders(button, append = false) {
       const data = await api('/api/orders?offset=' + offset);
       if (serial !== orderSerial) return;
       const freshItems = data.items || [];
-      if (!append) $('#statOrders').textContent = freshItems.filter(order => order.status === 'DELIVERED').length;
+      if (!append) {
+        const delivered = Number(data.totals?.delivered);
+        $('#statOrders').textContent = Number.isFinite(delivered) ? delivered : freshItems.filter(order => order.status === 'DELIVERED').length;
+      }
       const seen = new Set(append ? orderItems.map(order => order.key) : []);
       orderItems = append ? [...orderItems, ...freshItems.filter(order => !seen.has(order.key))] : freshItems;
       orderNext = data.next_offset; $('#ordersMore').classList.toggle('hidden', !data.has_more);
@@ -393,10 +401,17 @@ async function loadSubscriptions(button) {
       const data = await api('/api/subscriptions'); subscriptions = data.items || [];
       if (!subscriptions.length) $('#subscriptionList').innerHTML = '<div class="empty-state collection-empty"><span aria-hidden="true">↻</span><b>还没有订阅系列</b>订阅后，更新内容都会在这里等你。<div class="actions" style="justify-content:center;margin-top:16px"><a class="sbtn sm primary" href="/shop">发现系列 ↗</a></div></div>';
       else $('#subscriptionList').innerHTML = subscriptions.map(sub => {
-        const active = subActive(sub), status = sub.permanent ? '永久有效' : active ? '订阅有效' : '已到期';
-        const until = sub.permanent ? '永久查看系列更新' : (active ? '有效期至 ' : '已于 ') + fmtTime(sub.expires_at) + (active ? '' : ' 到期');
-        const renew = sub.status === 'ACTIVE' && !sub.permanent ? `<a class="sbtn sm" href="/shop?q=${encodeURIComponent(sub.title)}">${active ? '手动续订' : '重新订阅'} ↗</a>` : '';
-        return `<article class="subscription-card"><div class="subscription-icon" aria-hidden="true">↻</div><div class="subscription-content"><div class="collection-heading"><div><span class="collection-type">SERIES COLLECTION</span><h4>${esc(sub.title)}</h4></div><span class="status-pill ${active ? 'ok' : 'bad'}">${status}</span></div><p>${esc(until)}</p><div class="subscription-actions">${active ? `<button class="sbtn sm primary" data-open-series="${esc(sub.product_id)}">查看系列更新 ↗</button>` : '<span class="subscription-expired">续订后可继续查看历史及新增更新</span>'}${renew}${sub.status !== 'ACTIVE' && !sub.permanent ? '<span class="subscription-expired">商品已下架，暂无法续订</span>' : ''}</div></div></article>`;
+        const active = subActive(sub);
+        // Days left drives both the label and the renewal nudge; a subscription
+        // that expires this week should say so instead of hiding behind "订阅有效".
+        const daysLeft = sub.permanent || !sub.expires_at ? null : Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / 86400000);
+        const expiringSoon = active && daysLeft !== null && daysLeft <= 7;
+        const status = sub.permanent ? '永久有效' : !active ? '已到期' : expiringSoon ? `还剩 ${Math.max(daysLeft, 0)} 天` : '订阅有效';
+        const until = sub.permanent ? '永久查看系列更新'
+          : active ? `有效期至 ${fmtTime(sub.expires_at)}${daysLeft !== null ? `（还剩 ${Math.max(daysLeft, 0)} 天）` : ''}`
+          : `已于 ${fmtTime(sub.expires_at)} 到期`;
+        const renew = sub.status === 'ACTIVE' && !sub.permanent ? `<a class="sbtn sm" href="/shop?product=${encodeURIComponent(sub.product_id)}">${active ? '手动续订' : '重新订阅'} ↗</a>` : '';
+        return `<article class="subscription-card"><div class="subscription-icon" aria-hidden="true">↻</div><div class="subscription-content"><div class="collection-heading"><div><span class="collection-type">SERIES COLLECTION</span><h4>${esc(sub.title)}</h4></div><span class="status-pill ${active ? (expiringSoon ? 'wait' : 'ok') : 'bad'}">${status}</span></div><p>${esc(until)}</p><div class="subscription-actions">${active ? `<button class="sbtn sm primary" data-open-series="${esc(sub.product_id)}">查看系列更新 ↗</button>` : '<span class="subscription-expired">续订后可继续查看历史及新增更新</span>'}${renew}${sub.status !== 'ACTIVE' && !sub.permanent ? '<span class="subscription-expired">商品已下架，暂无法续订</span>' : ''}</div></div></article>`;
       }).join('');
       if (requestedProduct) {
         const wanted = requestedProduct; requestedProduct = '';

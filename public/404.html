@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>页面走丢了 · 一人一服数字杂货铺</title>
+<style>
+  :root { --ink:#211d2b; --muted:#7d7488; --line:#ece7f1; --accent:#6f57c4; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+    background:radial-gradient(1200px 600px at 15% -10%, #f3eeff 0%, #fbfafc 55%, #fff 100%);
+    color:var(--ink); font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif; }
+  main { width:100%; max-width:520px; padding:40px 32px; border:1px solid var(--line); border-radius:24px; background:#fff;
+    box-shadow:0 24px 70px rgba(45,33,74,.08); text-align:center; }
+  .kicker { color:#b3a6cf; font-size:10px; font-weight:800; letter-spacing:.18em; text-transform:uppercase; }
+  h1 { margin:10px 0 6px; font-size:26px; letter-spacing:-.01em; }
+  p { margin:0 0 26px; color:var(--muted); }
+  .actions { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  a { display:inline-flex; align-items:center; gap:6px; padding:11px 20px; border-radius:99px; border:1px solid var(--line);
+    color:var(--ink); font-size:13px; font-weight:650; text-decoration:none; transition:transform .15s ease, box-shadow .15s ease; }
+  a.primary { border-color:transparent; background:var(--ink); color:#fff; }
+  a:hover { transform:translateY(-1px); box-shadow:0 10px 24px rgba(45,33,74,.12); }
+  a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+  code { padding:2px 6px; border-radius:6px; background:#f6f3fa; color:#6a5f7b; font-size:12px; }
+  @media (prefers-reduced-motion: reduce) { a { transition:none; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="kicker">404 · NOT FOUND</div>
+  <h1>这件东西可能已经下架</h1>
+  <p>链接地址是 <code id="where"></code>。<br>也许商品被撤下了，也许链接少了一个字符。</p>
+  <div class="actions">
+    <a class="primary" href="/shop">去商品页逛逛 ↗</a>
+    <a href="/">回到首页</a>
+  </div>
+</main>
+<script>
+  const path = location.pathname + location.search;
+  document.getElementById('where').textContent = path.length > 64 ? path.slice(0, 61) + '…' : path;
+</script>
+</body>
+</html>

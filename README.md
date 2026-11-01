@@ -11,7 +11,7 @@
 ### 前台
 
 - **首页（`/`）**：品牌入口与分类导航，不再直接堆叠商品货架。
-- **商品页（`/shop`）**：独立商品目录，支持按一级分类、二级子分类、多选标签、关键词筛选与积分排序；多个标签需同时满足；父分类自动包含其子分类商品。
+- **商品页（`/shop`）**：独立商品目录，支持按一级分类、二级子分类、多选标签、关键词筛选与积分排序；多个标签需同时满足；父分类自动包含其子分类商品。点击商品标题或「阅读商品详情」打开详情弹窗，展示后台填写的详情、标签、系列规则与公开目录；`/shop?product=<id>` 可直接打开该弹窗，分类、标签、关键词与排序（`sort`）都会写入 URL，刷新和分享不丢失。
 - **个人中心（`/account`）**：注册 / 登录、积分余额、充值套餐、我的已购、我的订阅与账户信息。充值入口只放在个人中心。
 - **积分充值**：只读加载一人付当前 `/product` 可售积分套餐，点击后拿 `purchase_url` 跳转支付宝；入口状态不等于支付成功。
 - **积分兑换**：先使用店铺赠送积分；不足部分再用 `/consume` 幂等核销支付宝积分。涉及一人付时，**只有 `status=SUCCEEDED && confirmed=true` 才交付内容**；纯赠送积分订单无需请求一人付。
@@ -30,9 +30,9 @@
   - `文本`：兑换后直接显示文本内容，可复制（适合卡密、提取码、账号信息）。
   - `链接`：兑换后显示可点击链接（适合网盘分享链接、R2 公开域名）。
   - `文件`：后台上传文件到 R2（单文件 ≤ 50MB），用户点「下载文件」时由 Worker 校验登录态与订单归属后流式返回，链接不可被他人复用、不可枚举。
-- **成交订单**：订单号、商品、用户邮箱、消耗积分、交付状态、时间。
+- **成交订单**：订单号、商品、用户邮箱、消耗积分、交付状态、时间；支持按状态（待确认 / 已交付 / 失败）筛选并分页加载。
 - 站点名称 / 说明、一人付 `/capabilities` 与 `/product` 只读联调、平台购买与核销记录、Webhook 配置与签名轮换。
-- **用户管理**：按邮箱搜索，查看身份、会话、订单数和店铺赠送积分；管理员可填写原因增加或扣减赠送积分并查看流水。支持设置角色、重置密码、停用/启用和删除账号；有待确认订单的账号不能删除，删除后保留积分流水供对账。
+- **用户管理**：按邮箱搜索并分页浏览，查看身份、会话、订单数和店铺赠送积分；管理员可填写原因增加或扣减赠送积分并查看流水。支持设置角色、重置密码、停用/启用和删除账号；有待确认订单的账号不能删除，删除后保留积分流水供对账。
 - **数据查看**：后台列表与卡片支持小屏幕；右上角「查看原数据」按需加载本地 Monaco（VS Code 同款编辑器），只读展示 JSON。
 - **在线修改凭证**：一人付 API Key、Webhook 签名密钥均可在后台修改，存于 D1 `settings` 表并优先于 Worker Secret；接口只返回掩码，完整密钥不回传浏览器。所有敏感操作写入 `admin_audit`。
 
@@ -52,7 +52,7 @@
 
 ### 升级已有数据库
 
-**新代码依赖 `0006_bonus_points.sql`、`0007_catalog_agent.sql`、`0008_subscriptions_and_repeat.sql` 和 `0009_agent_pairing.sql`；上线前必须先迁移**，否则商品、兑换、订阅、用户管理或 Agent 接口可能报错。`0008` 将旧商品设为不允许重复购买，历史订单视为普通商品订单，不会自动变为订阅；`0009` 新增 Agent 配对、凭据和限流表。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换及后台账号管理，确保**所有旧 Worker 版本停止处理兑换和管理请求**，再应用迁移、部署新版本、验证后恢复流量。旧版管理接口不会撤销新配对的 Agent 凭据，升级期间也不要让旧版处理 Agent / 管理请求。旧代码不能保证新的重复购买和订阅规则，迁移后不可让新旧版本同时处理兑换。未确认的旧订单保留原业务编号查询，不要重建或手工退款；回滚前应暂停兑换并核对新订单及权益，不能直接用旧版代码继续处理订阅。
+**新代码依赖 `0006_bonus_points.sql`、`0007_catalog_agent.sql`、`0008_subscriptions_and_repeat.sql`、`0009_agent_pairing.sql` 和 `0010_auth_limits.sql`；上线前必须先迁移**，否则商品、兑换、订阅、用户管理或 Agent 接口可能报错。`0008` 将旧商品设为不允许重复购买，历史订单视为普通商品订单，不会自动变为订阅；`0009` 新增 Agent 配对、凭据和限流表；`0010` 新增登录 / 注册限流计数表（缺失时代码自动降级为不限流，不会影响登录）。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换及后台账号管理，确保**所有旧 Worker 版本停止处理兑换和管理请求**，再应用迁移、部署新版本、验证后恢复流量。旧版管理接口不会撤销新配对的 Agent 凭据，升级期间也不要让旧版处理 Agent / 管理请求。旧代码不能保证新的重复购买和订阅规则，迁移后不可让新旧版本同时处理兑换。未确认的旧订单保留原业务编号查询，不要重建或手工退款；回滚前应暂停兑换并核对新订单及权益，不能直接用旧版代码继续处理订阅。
 
 ```bash
 # 仅在获得正式上线授权后操作远程数据库
@@ -200,7 +200,7 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | GET | `/api/products` | 已上架商品（不含交付内容）；支持 `q`、`category`、重复 `tag` 参数筛选（最多 8 个，AND 关系） |
 | GET | `/api/categories` | 前台可见的一级分类与子分类，含商品数 |
 | POST | `/api/products/:id/purchase` | 用积分兑换，body `{ idempotency_key, expected_price?, expected_kind?, expected_days?, subscription_revision? }`；订阅新订单必须带确认字段，普通商品可选；这些字段用于防止按旧条件扣费，不能指定实际扣费金额 |
-| GET | `/api/orders?offset=0` | 本人的订单与已交付内容，每页 50 项 |
+| GET | `/api/orders?offset=0` | 本人的订单与已交付内容，每页 50 项；另返回 `totals`（`total` / `delivered` / `pending`），个人中心据此显示累计已交付订单数 |
 | GET | `/api/library` | 本人的普通商品 ID 和订阅状态（私有，不缓存） |
 | GET | `/api/subscriptions` | 本人的订阅及有效期（私有，不缓存） |
 | GET | `/api/subscriptions/:product/updates?offset=0` | 有效订阅者读取已发布更新，每页 30 项 |
@@ -209,11 +209,12 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | GET | `/api/download/:orderKey` | 下载文件交付（需登录且为订单本人） |
 | GET | `/api/product` | 一人付充值套餐（只读） |
 | POST | `/api/purchase` | 创建积分充值购买入口 |
-| GET | `/api/access` | 店铺赠送及支付宝积分分项；支付宝不可用时仍返回店铺余额 |
+| GET | `/api/access` | 店铺赠送及支付宝积分分项，另返回 `used_points`（已交付订单累计消耗积分）；支付宝不可用时仍返回店铺余额 |
 | POST | `/api/admin/login` | 管理员账号登录，body `{ email, password }` |
 | GET | `/api/admin/me` | 当前独立后台会话 |
 | POST | `/api/admin/logout` | 退出后台，不影响前台会话 |
 | GET/POST/PUT/DELETE | `/api/admin/products[/:id]` | 商品管理（含重复购买与订阅规则） |
+| POST | `/api/admin/products/:id/status` | 只改上下架状态，body `{ status: "ACTIVE" \| "HIDDEN" }`；不会重写库存、目录或交付内容 |
 | GET/POST/PUT/DELETE | `/api/admin/products/:id/updates[/:update]` | 管理系列更新，列表每页 50 项 |
 | GET | `/api/admin/status` | 管理员读取服务、R2、Agent 配对数据库及旧版固定令牌配置状态；不返回凭据 |
 | POST/DELETE | `/api/admin/agent/pairing` | 生成或作废本管理员的一次性配对码 |
@@ -227,7 +228,7 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | POST | `/api/agent/pair` | 用 10 位配对码换取 30 天 Agent Bearer 令牌（匿名、一次性、限流） |
 | POST | `/api/agent/uploads` | Bearer 令牌上传 Agent 文件（multipart） |
 | POST | `/api/agent/drafts` | Bearer 令牌关联已上传文件并创建隐藏草稿（幂等） |
-| GET | `/api/admin/orders` | 成交订单列表 |
+| GET | `/api/admin/orders` | 成交订单列表；支持 `limit`、`offset` 与 `status`（`PENDING` / `DELIVERED` / `FAILED`），返回 `has_more`、`next_offset` |
 | POST | `/api/admin/users/:id/role` | 设置管理员角色，body `{ role: "admin" \| "user" }` |
 | GET | `/api/admin/users/:id/bonus` | 店铺赠送积分余额与最近流水 |
 | POST | `/api/admin/users/:id/bonus` | 调整赠送积分，body `{ delta, reason, idempotency_key }`；操作编号可安全重试 |
@@ -284,6 +285,12 @@ curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
 
 相同编号和内容重试返回原草稿；同一编号用于不同内容返回 409；草稿删除后原编号不能重新创建。Agent 即使提交 `status: ACTIVE` 也只会得到隐藏草稿。上传请求本身不去重，失败重试可能留下未关联文件，应定期清理 R2 中无引用的 `agent/` 对象。配对令牌泄露时在后台立即撤销；旧版固定令牌需单独轮换或移除。上传与草稿接口尚无内置全局限流，建议额外配置 Cloudflare WAF / API 速率限制。
 
+## 错误页与收录
+
+- 未知的 `/api/*` 路径一律返回 JSON `404 {"error_code":"NOT_FOUND"}`，前端可以直接解析；未知的页面路径（浏览器请求、`Accept` 含 `text/html`）返回 `public/404.html` 并带 `cache-control: no-store`，避免把 404 缓存成首页。
+- `public/robots.txt` 允许收录前台页面，禁止 `/admin`、`/account` 与 `/api/`；后台页面同时返回 `private, no-store`。
+- 所有响应都带 `x-content-type-options: nosniff` 与 `referrer-policy: strict-origin-when-cross-origin`。
+
 ## 缓存策略
 
 公共数据由 Cloudflare Cache API 在边缘数据中心缓存，并允许浏览器短时间复用：
@@ -301,6 +308,13 @@ curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
 - Cloudflare Cache API 的缓存按数据中心隔离，不是全球同步失效：其他域名或数据中心的旧数据要等对应的边缘 TTL 到期；浏览器若刚取到旧数据，还可能多保留其浏览器 TTL。可用请求头 `Cache-Control: no-cache` 强制回源并刷新当前数据中心的缓存。实际库存和积分仍由服务端在兑换时校验。
 - 前台 HTML 外壳浏览器缓存 30 秒、共享缓存最多 60 秒，后台 HTML `private, no-store`。带 `?v=` 版本号的 CSS/JS 缓存 24 小时并标记 `immutable`，其他公开静态资源缓存 1 小时。**修改 CSS/JS 时应同步更新引用它的 HTML 中的版本号**，避免浏览器继续使用旧资源；HTML 更新可能受共享及浏览器缓存时间影响。
 - 可缓存的公开 JSON 响应的 `x-cache` 标记为 `HIT`、`MISS`、`REFRESH` 或 `BYPASS`；静态资源标记为 `ASSET`。缓存写入异步完成，刚刚首次请求之后的并发请求也可能暂时显示 `MISS`。
+
+## 登录与注册限流
+
+- `/api/auth/login`、`/api/admin/login`、`/api/auth/register` 每次尝试都会在 `auth_limits`（迁移 `0010`）记账：同一客户端地址 5 分钟内最多 20 次，同一邮箱 5 分钟内最多 8 次；超限返回 `429` 与 `Retry-After: 300`。登录成功后清空该邮箱的计数。
+- 客户端地址只使用 Cloudflare 提供的 `CF-Connecting-IP` 并以哈希形式存储，不信任客户端自带的转发头，也不记录明文 IP。
+- 若数据库尚未应用 `0010` 迁移，限流自动降级为不生效（登录仍可用），因此升级顺序可以是"先部署、后迁移"，但建议尽快迁移以获得保护。
+- 限流不能替代 Cloudflare WAF / 边缘速率限制；如需抵御大流量撞库，仍应在边缘配置额外规则。
 
 ## 安全行为
 

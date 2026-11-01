@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>全部商品 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-2">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -23,7 +23,7 @@
     </nav>
     <div class="header-side">
       <span class="points-chip hidden" data-points-wrap><b data-points>0</b><span>积分</span></span>
-      <a class="header-search" href="/shop" aria-label="搜索商品"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4 4" stroke-linecap="round"/></svg></a>
+      <a class="header-search" id="headerSearch" href="/shop" aria-label="搜索商品"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4 4" stroke-linecap="round"/></svg></a>
       <a class="account-link" href="/account"><span class="account-dot" data-account-dot aria-hidden="true">↗</span><span data-account-label>登录 / 注册</span></a>
     </div>
   </div>
@@ -85,6 +85,23 @@
   <div class="container footer-bottom"><span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span><span>用一点积分，兑换一点喜欢。 &nbsp; ✦</span></div>
 </footer>
 
+<div class="modal" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+  <div class="modal-dialog detail-dialog">
+    <button class="modal-close" aria-label="关闭商品详情" onclick="Store.setModal('#detailModal', false)">×</button>
+    <div class="modal-kicker">PRODUCT DETAILS <span>✦</span></div>
+    <div class="detail-cover" id="detailCover" aria-hidden="true"></div>
+    <h2 id="detailTitle">商品详情</h2>
+    <p id="detailMeta"></p>
+    <div class="detail-tags" id="detailTags"></div>
+    <div class="detail-body" id="detailBody"></div>
+    <div class="detail-foot">
+      <div class="detail-pricing"><span>积分价格</span><div class="price" id="detailPrice">—</div><div class="stock-note" id="detailStock"></div></div>
+      <div class="detail-actions" id="detailActions"></div>
+    </div>
+    <button class="catalog-trigger hidden" id="detailCatalog" type="button">查看资源目录 <small></small><b aria-hidden="true">↗</b></button>
+  </div>
+</div>
+
 <div class="modal" id="previewModal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
   <div class="modal-dialog catalog-dialog">
     <button class="modal-close" aria-label="关闭目录" onclick="Store.setModal('#previewModal', false)">×</button>
@@ -104,6 +121,7 @@
     <h2 id="purchaseTitle">确认兑换</h2><p>请确认商品与兑换条件，确认后才会扣减积分。</p>
     <div class="purchase-product"><div class="purchase-symbol" aria-hidden="true">✦</div><div><small id="purchaseKind">数字商品</small><b id="purchaseName"></b></div><strong id="purchasePrice"></strong></div>
     <div id="purchaseTerms" class="purchase-terms"></div>
+    <div class="purchase-balance" id="purchaseBalance" aria-live="polite"></div>
     <div class="purchase-actions"><button class="sbtn" type="button" onclick="Store.setModal('#purchaseModal', false)">再想想</button><button class="sbtn primary" id="confirmPurchase" type="button" onclick="submitPurchase(this)">确认兑换 <span aria-hidden="true">↗</span></button></div>
     <div class="purchase-foot">优先使用店铺赠送积分，不足部分使用支付宝积分。</div>
   </div>
@@ -119,9 +137,9 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-2"></script>
 <script>
-const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, query } = Store;
+const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, fmtTime, query } = Store;
 let me = null, points = null, products = [], categories = [];
 let authReady = false, accessReady = false, catalogLoaded = false, isAdmin = false;
 let library = { owned_product_ids: [], subscriptions: [] }, libraryReady = false, libraryFailed = false;
@@ -139,11 +157,15 @@ function setFiltersExpanded(expanded) {
 setFiltersExpanded(!mobileFilters.matches);
 mobileFilters.addEventListener('change', event => setFiltersExpanded(!event.matches));
 $('#filterToggle').addEventListener('click', () => setFiltersExpanded($('#filterToggle').getAttribute('aria-expanded') !== 'true'));
+const SORT_OPTIONS = ['recommended', 'price-asc', 'price-desc', 'newest'];
+const requestedSort = params.get('sort') || '';
 const state = {
   category: params.get('category') || '',
   tags: [...new Set(params.getAll('tag').map(tag => tag.trim().slice(0, 24)).filter(Boolean))].sort().slice(0, 8),
   q: params.get('q') || '',
-  sort: 'recommended'
+  // Keeping the sort in the URL means a refresh, a shared link or the back
+  // button no longer silently drops the user's chosen order.
+  sort: SORT_OPTIONS.includes(requestedSort) ? requestedSort : 'recommended'
 };
 
 const categoryById = id => categories.find(item => item.id === id);
@@ -159,6 +181,7 @@ function syncUrl() {
   if (state.category) next.set('category', state.category);
   state.tags.forEach(tag => next.append('tag', tag));
   if (state.q) next.set('q', state.q);
+  if (state.sort !== 'recommended') next.set('sort', state.sort);
   history.replaceState(null, '', next.toString() ? `/shop?${next}` : '/shop');
 }
 
@@ -204,36 +227,55 @@ function renderProducts() {
     return;
   }
   $('#productGrid').innerHTML = list.map((product, index) => {
-    const soldOut = product.stock !== null && product.stock !== undefined && Number(product.stock) <= 0;
-    const enough = points === null ? null : Number(points) >= Number(product.price_points);
-    const checkingAccount = !authReady || (me && !accessReady);
-    const series = product.product_kind === 'SUBSCRIPTION', sub = subscriptionFor(product.id);
-    const owned = (library.owned_product_ids || []).includes(product.id);
-    const viewOwned = me && libraryReady && ((series && sub && (sub.permanent || soldOut)) || (!series && owned && (!product.allow_repeat || soldOut)));
-    const label = checkingAccount ? '确认账户中' : (libraryFailed && me ? '重试账户状态' : (!me ? '登录后兑换' : soldOut ? '已售罄' : enough === false ? '积分不足' : series ? (sub ? '手动续订' : '订阅系列') : owned ? '再次兑换' : '立即兑换'));
+    const view = productView(product);
     const category = categoryLabel(product.category_id);
     const cover = productCover(product, index);
-    const subLabel = sub ? (sub.permanent ? '永久订阅' : (subscriptionActive(sub) ? '订阅中' : '已到期')) : '';
-    const seriesInfo = series ? `<div class="product-series"><span>↻ 系列订阅</span><span>${Number(product.subscription_days) ? Number(product.subscription_days) + ' 天 · 手动续费' : '永久有效'}</span><span>${esc(frequencyLabel(product.update_frequency))}</span></div>` : '';
+    const subLabel = view.sub ? (view.sub.permanent ? '永久订阅' : (subscriptionActive(view.sub) ? '订阅中' : '已到期')) : '';
+    const seriesInfo = view.series ? `<div class="product-series"><span>↻ 系列订阅</span><span>${Number(product.subscription_days) ? Number(product.subscription_days) + ' 天 · 手动续费' : '永久有效'}</span><span>${esc(frequencyLabel(product.update_frequency))}</span></div>` : '';
     return `<article class="product-card">
       ${cover}
       <div class="product-body">
-        <div class="product-cat">${esc(category)} ${subLabel ? `<span class="owned-badge">${esc(subLabel)}</span>` : owned ? '<span class="owned-badge">已拥有</span>' : ''}</div>
-        <h3>${esc(product.title)}</h3>
+        <div class="product-cat">${esc(category)} ${subLabel ? `<span class="owned-badge">${esc(subLabel)}</span>` : view.owned ? '<span class="owned-badge">已拥有</span>' : ''}</div>
+        <h3><button class="product-title-btn" type="button" data-detail="${esc(product.id)}">${esc(product.title)}</button></h3>
         <p class="summary">${esc(product.summary || '')}</p>
         ${seriesInfo}
         <div class="product-tags">${(product.tags || []).slice(0, 4).map(tag => `<button class="product-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div>
         ${(product.preview_files || []).length ? `<button class="catalog-trigger" data-preview="${esc(product.id)}"><span aria-hidden="true">▤</span> 查看资源目录 <small>${product.preview_files.length} 项${product.preview_truncated ? ' · 部分' : ''}</small><b aria-hidden="true">↗</b></button>` : ''}
+        ${product.description ? `<button class="detail-trigger" type="button" data-detail="${esc(product.id)}">阅读商品详情 <span aria-hidden="true">↗</span></button>` : ''}
         ${isAdmin ? `<a class="admin-edit-link" href="/admin?edit=${encodeURIComponent(product.id)}">✎ 编辑商品</a>` : ''}
         <div class="product-footer">
-          <div><div class="price">${Number(product.price_points)} <small>积分</small></div><div class="stock-note">${product.stock === null || product.stock === undefined ? '不限量' : soldOut ? '已售罄' : '剩余 ' + Number(product.stock)}</div></div>
-          ${viewOwned ? `<a class="sbtn sm soft" href="/account?tab=${series ? 'subscriptions&product=' + encodeURIComponent(product.id) : 'orders'}">${series ? '查看订阅' : '查看已购'} ↗</a>`
-            : libraryFailed && me && !checkingAccount ? '<button class="sbtn sm" data-retry-library>重试账户状态 ↻</button>'
-            : `<button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut || checkingAccount ? 'disabled' : ''} data-buy="${esc(product.id)}">${label} <span aria-hidden="true">↗</span></button>`}
+          <div><div class="price">${Number(product.price_points)} <small>积分</small></div><div class="stock-note">${stockNote(product, view)}</div></div>
+          ${view.viewOwned ? `<a class="sbtn sm soft" href="${ownedLink(product, view)}">${view.series ? '查看订阅' : '查看已购'} ↗</a>`
+            : view.retryable ? '<button class="sbtn sm" data-retry-library>重试账户状态 ↻</button>'
+            : `<button class="sbtn sm ${view.enough === false ? '' : 'primary'}" ${view.soldOut || view.checkingAccount ? 'disabled' : ''} data-buy="${esc(product.id)}">${view.label} <span aria-hidden="true">↗</span></button>`}
         </div>
       </div>
     </article>`;
   }).join('');
+}
+
+// One place decides what the buy button says and whether it is usable, so the
+// card and the detail dialog can never disagree with each other.
+function productView(product) {
+  const soldOut = product.stock !== null && product.stock !== undefined && Number(product.stock) <= 0;
+  const enough = points === null ? null : Number(points) >= Number(product.price_points);
+  const checkingAccount = !authReady || Boolean(me && !accessReady);
+  const series = product.product_kind === 'SUBSCRIPTION', sub = subscriptionFor(product.id);
+  const owned = (library.owned_product_ids || []).includes(product.id);
+  const viewOwned = Boolean(me && libraryReady && ((series && sub && (sub.permanent || soldOut)) || (!series && owned && (!product.allow_repeat || soldOut))));
+  const retryable = Boolean(libraryFailed && me && !checkingAccount);
+  const label = checkingAccount ? '确认账户中' : (libraryFailed && me ? '重试账户状态' : (!me ? '登录后兑换' : soldOut ? '已售罄' : enough === false ? '积分不足' : series ? (sub ? '手动续订' : '订阅系列') : owned ? '再次兑换' : '立即兑换'));
+  return { soldOut, enough, checkingAccount, series, sub, owned, viewOwned, retryable, label };
+}
+
+function stockNote(product, view = productView(product)) {
+  if (product.stock === null || product.stock === undefined) return '不限量';
+  if (view.soldOut) return '暂时售罄，等待补货';
+  return '剩余 ' + Number(product.stock);
+}
+
+function ownedLink(product, view = productView(product)) {
+  return `/account?tab=${view.series ? 'subscriptions&product=' + encodeURIComponent(product.id) : 'orders'}`;
 }
 
 function applyState() {
@@ -320,8 +362,25 @@ function buyProduct(id) {
   const term = series ? (quote.expected_days ? `${quote.expected_days} 天有效 · ${sub && subscriptionActive(sub) ? '从原到期日顺延' : '从开通时起计算'}` : '永久有效') : (product.allow_repeat ? '此商品允许重复兑换' : '每个账号仅可兑换一次');
   $('#purchaseTerms').innerHTML = `<div><span>兑换规则</span><b>${esc(term)}</b></div>${series ? `<div><span>更新频率</span><b>${esc(frequencyLabel(product.update_frequency))}</b></div><p>仅手动续费，不会自动扣费。有效期内可查看历史和新增更新；已下载文件或已复制的外部链接无法收回。</p>` : '<p>确认后内容会保存至「我的已购」。</p>'}${previous.key ? '<p class="pending-warning">存在未确认的操作：将使用原订单编号重试或查询；如此前未提交成功，将按已确认条件尝试兑换。</p>' : ''}`;
   $('#confirmPurchase').textContent = previous.key ? '继续确认' : (series && sub ? '确认续订' : '确认兑换');
+  renderPurchaseBalance(previous, quote);
   setModal('#purchaseModal', true, '#confirmPurchase');
 }
+// Users need to see what the dialog will leave them with before confirming; a
+// toast after the click is too late. The server still validates every amount.
+function renderPurchaseBalance(previous, quote) {
+  const box = $('#purchaseBalance'), confirm = $('#confirmPurchase');
+  confirm.disabled = false;
+  if (points === null) { box.innerHTML = ''; box.classList.remove('is-short'); return; }
+  const price = Number(quote.expected_price) || 0;
+  const left = Number(points) - price;
+  const short = left < 0 && !previous.key;
+  box.classList.toggle('is-short', short);
+  box.innerHTML = short
+    ? `当前可用 <b>${Number(points)}</b> 积分，还差 <b>${Math.abs(left)}</b> 积分 · <a href="/account?tab=recharge">去充值</a>`
+    : `当前可用 <b>${Number(points)}</b> 积分 · 兑换后剩余 <b>${Math.max(0, left)}</b> 积分`;
+  confirm.disabled = short;
+}
+
 function setPurchaseBusy(busy) {
   const modal = $('#purchaseModal');
   if (busy) modal.setAttribute('aria-busy', 'true'); else modal.removeAttribute('aria-busy');
@@ -334,7 +393,7 @@ async function submitPurchase(button) {
   return withBusy(button, async () => {
     const modal = $('#purchaseModal'); modal.setAttribute('tabindex', '-1'); modal.focus({ preventScroll: true });
     const { slot, key: previousKey, quote: previousQuote } = draft.previous;
-    const key = previousKey || 'ord-' + crypto.randomUUID();
+    const key = previousKey || 'ord-' + Store.uuid();
     const payload = previousQuote || { ...draft.quote, idempotency_key: key };
     try { sessionStorage.setItem(slot, key); sessionStorage.setItem(slot + ':quote', JSON.stringify(payload)); } catch {}
     try {
@@ -369,6 +428,56 @@ function showCatalog(id) {
 
 function toggleCatalog(open) { $$('#previewList details').forEach(node => { node.open = open; }); }
 
+/* ---------------- 商品详情弹窗 ---------------- */
+// The admin can write up to 4000 characters of detail, so the shelf needs a
+// place to read it before spending points. Cards link here and ?product=<id>
+// opens the same dialog directly (used by the home page and shared links).
+let detailId = '';
+function showDetail(id) {
+  const product = products.find(item => item.id === id);
+  if (!product) return;
+  detailId = product.id;
+  const view = productView(product);
+  $('#detailTitle').textContent = product.title;
+  $('#detailMeta').textContent = [categoryLabel(product.category_id), product.summary].filter(Boolean).join(' · ');
+  $('#detailCover').innerHTML = productCover(product);
+  $('#detailTags').innerHTML = (product.tags || []).map(tag => `<span class="detail-tag">${esc(tag)}</span>`).join('');
+  const blocks = [];
+  if (product.description) blocks.push(`<p class="detail-text">${esc(product.description).replace(/\n/g, '<br>')}</p>`);
+  if (view.series) {
+    blocks.push(`<div class="detail-note"><b>↻ 系列订阅</b><span>${Number(product.subscription_days) ? Number(product.subscription_days) + ' 天有效 · 到期后手动续费，不会自动扣费' : '永久有效 · 一次兑换长期查看'}</span><span>${esc(frequencyLabel(product.update_frequency))}</span></div>`);
+    if (view.sub) blocks.push(`<div class="detail-note"><b>我的订阅</b><span>${view.sub.permanent ? '永久订阅，可直接查看全部更新' : (subscriptionActive(view.sub) ? '有效期至 ' + fmtTime(view.sub.expires_at) : '已于 ' + fmtTime(view.sub.expires_at) + ' 到期，可手动续订')}</span></div>`);
+  }
+  if (!blocks.length && !(product.preview_files || []).length) blocks.push('<p class="detail-text detail-muted">该商品暂无更多说明，兑换后内容会保存在「我的已购」。</p>');
+  $('#detailBody').innerHTML = blocks.join('');
+  $('#detailPrice').innerHTML = `${Number(product.price_points)} <small>积分</small>`;
+  $('#detailStock').textContent = stockNote(product, view);
+  const catalog = $('#detailCatalog');
+  catalog.classList.toggle('hidden', !(product.preview_files || []).length);
+  if ((product.preview_files || []).length) {
+    catalog.querySelector('small').textContent = `${product.preview_files.length} 项${product.preview_truncated ? ' · 部分' : ''}`;
+    catalog.dataset.preview = product.id;
+  }
+  $('#detailActions').innerHTML = detailActionHtml(product, view);
+  if (isAdmin) $('#detailActions').insertAdjacentHTML('beforeend', `<a class="admin-edit-link" href="/admin?edit=${encodeURIComponent(product.id)}">✎ 编辑商品</a>`);
+  setModal('#detailModal', true, '.modal-close');
+}
+
+function detailActionHtml(product, view) {
+  if (view.viewOwned) return `<a class="sbtn primary" href="${ownedLink(product, view)}">${view.series ? '查看订阅' : '查看已购'} <span aria-hidden="true">↗</span></a>`;
+  if (!me) return `<a class="sbtn primary" href="/account?next=${encodeURIComponent('/shop?product=' + product.id)}">登录后兑换 <span aria-hidden="true">↗</span></a>`;
+  if (view.retryable) return '<button class="sbtn" data-retry-library>重试账户状态 ↻</button>';
+  if (view.soldOut) return '<button class="sbtn" disabled>已售罄</button>';
+  if (view.checkingAccount) return '<button class="sbtn" disabled>确认账户中…</button>';
+  return `<button class="sbtn primary" data-buy="${esc(product.id)}">${view.series ? (view.sub ? '手动续订' : '订阅系列') : '立即兑换'} · ${Number(product.price_points)} 积分</button>`;
+}
+
+// Opening the purchase dialog from the detail dialog would stack two modals.
+function openPurchase(productId) {
+  setModal('#detailModal', false);
+  buyProduct(productId);
+}
+
 $('#categoryFilters').addEventListener('click', event => {
   const button = event.target.closest('[data-category]');
   if (!button) return;
@@ -398,12 +507,24 @@ $('#productGrid').addEventListener('click', event => {
   const clear = event.target.closest('[data-clear]');
   const preview = event.target.closest('[data-preview]');
   const retry = event.target.closest('[data-retry-library]');
+  const detail = event.target.closest('[data-detail]');
   if (tag) toggleTag(tag.dataset.tag);
   else if (buy) buyProduct(buy.dataset.buy, buy);
   else if (preview) showCatalog(preview.dataset.preview);
+  else if (detail) showDetail(detail.dataset.detail);
   else if (retry) retryLibrary();
   else if (clear) clearFilter(clear.dataset.clear, clear.dataset.value);
 });
+$('#detailModal').addEventListener('click', event => {
+  const buy = event.target.closest('[data-buy]');
+  const preview = event.target.closest('[data-preview]');
+  const retry = event.target.closest('[data-retry-library]');
+  if (event.target === event.currentTarget) { setModal('#detailModal', false); return; }
+  if (preview) showCatalog(preview.dataset.preview);
+  else if (buy) openPurchase(buy.dataset.buy);
+  else if (retry) retryLibrary();
+});
+$('#detailModal')._onClose = () => { detailId = ''; };
 $('#activeFilters').addEventListener('click', event => {
   const button = event.target.closest('[data-clear]');
   if (button) clearFilter(button.dataset.clear, button.dataset.value);
@@ -419,6 +540,14 @@ $('#sortSelect').addEventListener('change', event => {
   renderProducts();
 });
 $('#searchInput').value = state.q;
+$('#sortSelect').value = state.sort;
+// On this page the header magnifier used to link back to /shop, i.e. nowhere.
+$('#headerSearch').addEventListener('click', event => {
+  event.preventDefault();
+  setFiltersExpanded(true);
+  $('#searchInput').focus({ preventScroll: false });
+  $('#searchInput').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 $('#year').textContent = new Date().getFullYear();
 
 (async () => {
@@ -439,6 +568,12 @@ $('#year').textContent = new Date().getFullYear();
   accessReady = true;
   if (catalogLoaded) renderProducts();
   await Promise.all([catalog, admin]);
+  // Shared links and the home page point at ?product=<id> to open the detail.
+  const requested = params.get('product');
+  if (requested && catalogLoaded) {
+    if (products.some(item => item.id === requested)) showDetail(requested);
+    else toast('该商品可能已下架');
+  }
 })();
 </script>
 </body>

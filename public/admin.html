@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261101-2">
+<link rel="stylesheet" href="/admin.css?v=20261101-4">
 </head>
 <body>
 
@@ -85,8 +85,8 @@
         <div class="panel-title"><h2>上架商品</h2><button class="raw-trigger" data-raw-for="goodsOut" onclick="openRaw('goodsOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">用户用积分兑换商品。交付内容支持三种：文本（如卡密、提取码）、链接（如网盘分享链接）、文件（上传到 R2，用户下载需登录且仅本人可下）。</p>
         <div class="actions toolbar" style="margin:0 0 14px">
-          <input id="goodsQuery" class="searchbox" placeholder="按名称搜索" maxlength="64" onkeydown="if(event.key==='Enter')loadGoods()">
-          <button class="btn secondary" onclick="loadGoods(this)">搜索</button>
+          <input id="goodsQuery" class="searchbox" placeholder="按名称搜索（输入即筛选）" maxlength="64" onkeydown="if(event.key==='Enter')loadGoods(this)">
+          <button class="btn secondary" id="goodsSearchBtn" onclick="loadGoods(this)">搜索</button>
           <button class="btn push" onclick="newGoods()">+ 上架新商品</button>
         </div>
 
@@ -236,8 +236,17 @@
       <div class="panel">
         <div class="panel-title"><h2>成交订单</h2><button class="raw-trigger" data-raw-for="ordersOut" onclick="openRaw('ordersOut')" disabled>查看原数据 ↗</button></div>
         <p class="sub">积分兑换记录。仅「已交付」的订单会展示交付内容；订单交付内容为快照，修改商品不会影响已购用户。</p>
-        <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadOrders()">刷新订单</button></div>
+        <div class="actions toolbar" style="margin:0 0 12px">
+          <select id="orderStatus" class="selectbox" aria-label="按状态筛选订单" onchange="loadOrders()">
+            <option value="">全部状态</option>
+            <option value="PENDING">待确认</option>
+            <option value="DELIVERED">已交付</option>
+            <option value="FAILED">失败</option>
+          </select>
+          <button class="btn secondary" onclick="loadOrders()">刷新订单</button>
+        </div>
         <div id="ordersOut"><div class="state">正在加载订单…</div></div>
+        <div class="actions" style="margin-top:12px"><button class="btn secondary hidden" id="ordersMore" type="button" onclick="loadOrders(true)">加载更多订单 ↓</button></div>
       </div>
     </section>
 
@@ -292,6 +301,7 @@
         </div>
         <div class="state" id="usersMeta" style="margin-bottom:10px">尚未加载</div>
         <div id="usersOut"></div>
+        <div class="actions pager hidden" id="usersPager" style="margin-top:12px"></div>
       </div>
     </section>
 
@@ -335,7 +345,7 @@
           <button class="btn secondary" onclick="loadWebhook()">读取状态</button>
           <button class="btn warn" onclick="rotateWebhook()">轮换签名密钥</button>
         </div>
-        <div id="secretBox" class="secret hidden" style="margin-top:14px"></div>
+        <div id="secretBox" class="secret hidden" style="margin-top:14px" role="status" aria-live="polite"></div>
         <div class="panel" style="margin:16px 0 0;background:#fbfcfa">
           <h2>部署接收端密钥</h2>
           <p class="sub" style="margin-bottom:0">首次保存通知或轮换密钥时平台仅返回一次。请复制并运行：<code>npx wrangler secret put YIRENFU_WEBHOOK_SECRET</code>。不要将密钥写入代码仓库。</p>
@@ -393,11 +403,33 @@
     <div class="code-window"><div class="code-toolbar"><span class="code-dots"><i></i><i></i><i></i></span><span>response.json</span><span class="code-readonly">只读</span></div><div id="rawEditor" class="raw-editor" aria-label="原始 JSON 数据"></div></div>
   </div>
 </div>
-<div class="toast" id="toast"></div>
+<div class="dialog-backdrop hidden" id="askDialog" role="dialog" aria-modal="true" aria-labelledby="askTitle" aria-describedby="askMessage">
+  <div class="dialog-card ask-dialog">
+    <div class="dialog-head"><div><span class="dialog-kicker" id="askKicker">CONFIRM</span><h2 id="askTitle">确认操作</h2></div><button class="dialog-close" type="button" data-ask-cancel aria-label="关闭">×</button></div>
+    <p class="dialog-copy ask-message" id="askMessage"></p>
+    <div class="field hidden" id="askField"><label for="askInput" id="askLabel">输入内容</label><input id="askInput" type="text" autocomplete="off"><p class="hint hidden" id="askHint"></p></div>
+    <div class="actions"><button class="btn" id="askOk" type="button">确认</button><button class="btn secondary" id="askCancel" type="button">取消</button></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// crypto.randomUUID() is unavailable outside secure contexts; the console must
+// still mint idempotency keys when served over plain http during a demo.
+function uuid() {
+  if (globalThis.crypto?.randomUUID) {
+    try { return crypto.randomUUID(); } catch { /* Fall through. */ }
+  }
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
 function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 3200); }
 async function withBusy(button, task) {
   if (!button) return task();
@@ -543,6 +575,83 @@ async function openRaw(id) {
     host.innerHTML = ''; const fallback = document.createElement('textarea'); fallback.className = 'raw-fallback'; fallback.readOnly = true; fallback.value = value; host.appendChild(fallback);
   }
 }
+/* ---------- 通用确认 / 输入弹窗（替代原生 confirm / prompt） ---------- */
+let askState = null;
+function openAsk({ kicker = 'CONFIRM', title = '确认操作', message = '', okLabel = '确认', cancelLabel = '取消', danger = false, input = null } = {}) {
+  if (askState) closeAsk(input ? null : false);
+  const modal = $('#askDialog'), field = $('#askField'), inputEl = $('#askInput'), hint = $('#askHint'), ok = $('#askOk');
+  $('#askKicker').textContent = kicker;
+  $('#askTitle').textContent = title;
+  $('#askMessage').textContent = message;
+  $('#askMessage').classList.toggle('hidden', !message);
+  ok.textContent = okLabel;
+  ok.className = danger ? 'btn warn' : 'btn';
+  $('#askCancel').textContent = cancelLabel;
+  field.classList.toggle('hidden', !input);
+  hint.classList.add('hidden'); hint.textContent = '';
+  if (input) {
+    $('#askLabel').textContent = input.label || '输入内容';
+    inputEl.type = input.type || 'text';
+    inputEl.value = '';
+    inputEl.placeholder = input.placeholder || '';
+    inputEl.autocomplete = input.type === 'password' ? 'new-password' : 'off';
+  }
+  modal.classList.remove('hidden');
+  document.body.classList.add('dialog-open');
+  askState = { input, resolve: null };
+  return new Promise(resolve => {
+    askState.resolve = resolve;
+    requestAnimationFrame(() => (input ? inputEl : ok).focus());
+  });
+}
+function closeAsk(result) {
+  const state = askState; if (!state) return;
+  askState = null;
+  $('#askDialog').classList.add('hidden');
+  if (!document.querySelector('.dialog-backdrop:not(.hidden)')) document.body.classList.remove('dialog-open');
+  state.resolve(result);
+}
+function submitAsk() {
+  const state = askState; if (!state) return;
+  if (!state.input) return closeAsk(true);
+  const value = $('#askInput').value;
+  const min = Number(state.input.minLength) || 0;
+  if (value.length < min) {
+    const hint = $('#askHint');
+    hint.textContent = min ? `至少需要 ${min} 位字符` : '请输入内容';
+    hint.classList.remove('hidden');
+    $('#askInput').focus();
+    return;
+  }
+  closeAsk(value);
+}
+function askConfirm(message, options = {}) {
+  return openAsk({ ...options, message }).then(result => result === true);
+}
+function askPassword(options = {}) {
+  return openAsk({
+    kicker: 'SECURITY', title: '重置登录密码', okLabel: '重置密码', danger: true, ...options,
+    input: { type: 'password', label: '新密码', minLength: 10, placeholder: '至少 10 位，建议使用随机密码', ...(options.input || {}) },
+  });
+}
+$('#askOk').addEventListener('click', submitAsk);
+$('#askCancel').addEventListener('click', () => closeAsk(null));
+$('#askDialog').addEventListener('click', event => {
+  if (event.target.closest('[data-ask-cancel]') || event.target.id === 'askDialog') closeAsk(null);
+});
+$('#askInput').addEventListener('keydown', event => {
+  if (event.key === 'Enter') { event.preventDefault(); submitAsk(); }
+});
+document.addEventListener('keydown', event => {
+  if (!askState) return;
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeAsk(null); return; }
+  if (event.key !== 'Tab') return;
+  const focusable = [...$('#askDialog').querySelectorAll('button, input')].filter(node => !node.disabled && node.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}, true);
 function closeDialog(id) {
   if (id === 'bonusDialog' && bonusPending) { toast('上次操作结果未知，请用原内容重试'); return; }
   $('#' + id).classList.add('hidden');
@@ -665,7 +774,7 @@ async function saveCategory(button) {
 }
 async function deleteCategory(id) {
   const c = CATEGORIES.find(x => x.id === id); if (!c) return;
-  if (!confirm('删除分类「' + c.name + '」？分类下有子分类或商品时不能删除。')) return;
+  if (!(await askConfirm('分类下有子分类或商品时不能删除。', { title: '删除分类「' + c.name + '」', okLabel: '删除分类', danger: true }))) return;
   try {
     await api('/api/admin/categories/' + encodeURIComponent(id), { method: 'DELETE' });
     toast('分类已删除');
@@ -686,6 +795,13 @@ async function loadGoods(button) {
   } catch (e) { $('#goodsOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
   });
 }
+// Typing in the goods search now filters after a short pause; the button and
+// Enter still trigger an immediate search.
+let goodsQueryTimer = null;
+$('#goodsQuery').addEventListener('input', () => {
+  clearTimeout(goodsQueryTimer);
+  goodsQueryTimer = setTimeout(() => loadGoods(), 350);
+});
 function renderGoods(items) {
   if (!items.length) {
     $('#goodsOut').innerHTML = '<div class="state">还没有商品。点击「+ 上架新商品」添加第一件，交付方式可选文本 / 链接 / 文件。</div>';
@@ -822,7 +938,7 @@ function fetchCatalog(button) {
 async function generateCover(button) {
   const prompt = $('#pCoverPrompt').value.trim();
   if (prompt.length < 3) { toast('请先填写封面描述'); return; }
-  if (!confirm('即将调用 Cloudflare Workers AI 生成一张封面。免费额度为账户共享，付费计划超额可能收费。确定继续？')) return;
+  if (!(await askConfirm('即将调用 Cloudflare Workers AI 生成一张封面。免费额度为账户共享，付费计划超额可能收费。', { kicker: 'WORKERS AI', title: '生成封面', okLabel: '继续生成' }))) return;
   const editor = editorSerial;
   return withBusy(button, async () => {
     try {
@@ -947,7 +1063,7 @@ async function saveGoods(button) {
   const nextCount = nextPreview.split('\n').filter(Boolean).length;
   const existingCount = Array.isArray(existing?.preview_files) ? existing.preview_files.length : 0;
   if (!series && existing && catalogTruncated && existingCount > nextCount &&
-      !confirm(`新读取的目录不完整（${nextCount} 项），当前商品已有 ${existingCount} 项。继续保存会用较少内容覆盖，确定吗？`)) return;
+      !(await askConfirm(`新读取的目录不完整（${nextCount} 项），当前商品已有 ${existingCount} 项。继续保存会用较少内容覆盖。`, { kicker: 'CATALOG', title: '目录可能变少', okLabel: '仍要保存', danger: true }))) return;
   const payload = {
     title: $('#pTitle').value,
     summary: $('#pSummary').value,
@@ -983,27 +1099,51 @@ async function toggleGoods(id) {
   const p = GOODS[id]; if (!p) return;
   const next = p.status === 'ACTIVE' ? 'HIDDEN' : 'ACTIVE';
   try {
-    await api('/api/admin/products/' + encodeURIComponent(id), {
-      method: 'PUT',
-      body: JSON.stringify({ ...p, status: next })
+    await api('/api/admin/products/' + encodeURIComponent(id) + '/status', {
+      method: 'POST',
+      body: JSON.stringify({ status: next }),
     });
     toast(next === 'ACTIVE' ? '已上架' : '已下架'); await loadGoods();
   } catch (e) { toast(e.message); }
 }
 async function deleteGoods(id) {
   const p = GOODS[id]; if (!p) return;
-  if (!confirm('删除商品「' + p.title + '」？已成交的订单会保留交付内容，商品将改为下架。')) return;
+  if (!(await askConfirm('已成交的订单会保留交付内容，商品将改为下架。', { title: '删除商品「' + p.title + '」', okLabel: '删除商品', danger: true }))) return;
   try { const d = await api('/api/admin/products/' + encodeURIComponent(id), { method: 'DELETE' }); toast(d.message || '已删除'); await loadGoods(); } catch (e) { toast(e.message); }
 }
 
 /* ---------- 订单 ---------- */
-async function loadOrders() {
+// Fifty rows used to be the hard ceiling: older orders were simply unreachable.
+// The list now keeps paging and can be filtered by status.
+let orderOffset = 0, orderLoading = false;
+async function loadOrders(append = false) {
+  if (orderLoading) return;
+  const status = ($('#orderStatus') || {}).value || '';
+  if (!append) { orderOffset = 0; ORDERS = []; }
+  if (!append) $('#ordersOut').innerHTML = '<div class="state">正在加载订单…</div>';
+  orderLoading = true;
   try {
-    const d = await api('/api/admin/orders?limit=50');
+    const query = '/api/admin/orders?limit=50&offset=' + orderOffset + (status ? '&status=' + encodeURIComponent(status) : '');
+    const d = await api(query);
     rememberRaw('ordersOut', d);
-    ORDERS = d.items || [];
-    if (!ORDERS.length) { $('#ordersOut').innerHTML = '<div class="state">还没有成交订单。</div>'; return; }
-    $('#ordersOut').innerHTML = `<table><thead><tr>
+    const seen = new Set(ORDERS.map(o => o.key));
+    ORDERS = ORDERS.concat((d.items || []).filter(o => !seen.has(o.key)));
+    orderOffset = Number(d.next_offset || orderOffset + 50);
+    const more = $('#ordersMore');
+    if (more) more.classList.toggle('hidden', !d.has_more);
+    renderOrders();
+  } catch (e) {
+    $('#ordersOut').innerHTML = `<div class="state">${esc(e.message)}</div>`;
+    const more = $('#ordersMore'); if (more) more.classList.add('hidden');
+    toast(e.message);
+  } finally { orderLoading = false; }
+}
+function renderOrders() {
+  if (!ORDERS.length) {
+    $('#ordersOut').innerHTML = '<div class="state">还没有符合条件的订单。</div>';
+    return;
+  }
+  $('#ordersOut').innerHTML = `<table><thead><tr>
       <th>订单号</th><th>商品</th><th>用户</th><th>积分</th><th>状态</th><th>时间</th>
     </tr></thead><tbody>${ORDERS.map(o => `<tr>
       <td class="mono" data-label="订单号">${esc(o.order_no)}</td>
@@ -1013,7 +1153,6 @@ async function loadOrders() {
       <td data-label="状态">${o.status === 'DELIVERED' ? '<span class="pill ok">已交付</span>' : o.status === 'PENDING' ? '<span class="pill wait">待确认</span>' : '<span class="pill bad">失败</span>'}</td>
       <td data-label="时间">${esc(fmt(o.created_at))}</td>
     </tr>`).join('')}</tbody></table>`;
-  } catch (e) { $('#ordersOut').innerHTML = `<div class="state">${esc(e.message)}</div>`; toast(e.message); }
 }
 
 /* ---------- 用户 ---------- */
@@ -1024,10 +1163,22 @@ async function loadUsers(offset) {
   try { renderUsers(await api('/api/admin/users?limit=20&offset=' + userOffset + '&q=' + encodeURIComponent(q))); }
   catch (e) { $('#usersMeta').textContent = e.message; toast(e.message); }
 }
+function renderUsersPager(d) {
+  const pager = $('#usersPager');
+  if (!pager) return;
+  const total = Number(d.total || 0), pages = Math.max(1, Math.ceil(total / 20));
+  const page = Math.floor(userOffset / 20) + 1;
+  pager.classList.toggle('hidden', pages <= 1);
+  if (pages <= 1) { pager.innerHTML = ''; return; }
+  pager.innerHTML = `<button class="btn secondary" type="button" onclick="loadUsers(${Math.max(0, userOffset - 20)})" ${userOffset <= 0 ? 'disabled' : ''}>← 上一页</button>
+    <span class="state" style="flex:1;min-width:auto;text-align:center">第 ${page} / ${pages} 页</span>
+    <button class="btn secondary" type="button" onclick="loadUsers(${userOffset + 20})" ${page >= pages ? 'disabled' : ''}>下一页 →</button>`;
+}
 function renderUsers(d) {
   rememberRaw('usersOut', d);
   USERS = {}; d.items.forEach(u => USERS[u.id] = u);
   $('#usersMeta').textContent = `共 ${d.total} 个账号 · 当前显示 ${d.items.length} 个`;
+  renderUsersPager(d);
   if (!d.items.length) { $('#usersOut').innerHTML = '<div class="state">没有匹配的账号</div>'; return; }
   $('#usersOut').innerHTML = `<table><thead><tr><th>邮箱 / ID</th><th>身份</th><th>状态</th><th>赠送积分</th><th>会话</th><th>充值单</th><th>已购</th><th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${d.items.map(u => `<tr>
     <td data-label="用户"><b>${esc(u.email)}</b><div class="mono">${esc(u.id)}</div></td>
@@ -1077,8 +1228,8 @@ async function submitBonus(button) {
   if (!Number.isSafeInteger(amount) || amount < 1 || amount > 100000000 || !reason || reason.length > 120) return toast('请填写有效的积分数量和调整原因');
   const delta = amount * Number($('#bonusDirection').value), snapshot = JSON.stringify({ user: bonusTarget, delta, reason });
   if (bonusPending && bonusPending.snapshot !== snapshot) return toast('上次操作状态未知，请用原内容重试以避免重复调整');
-  if (!bonusPending && !confirm(`确认${delta > 0 ? '增加' : '扣减'} ${amount} 店铺赠送积分？\n支付宝余额不会改变。`)) return;
-  bonusPending ||= { snapshot, key: crypto.randomUUID() };
+  if (!bonusPending && !(await askConfirm('支付宝余额不会改变，仅调整店铺赠送积分。', { kicker: 'STORE CREDITS', title: `确认${delta > 0 ? '增加' : '扣减'} ${amount} 积分`, okLabel: '确认调整', danger: delta < 0 }))) return;
+  bonusPending ||= { snapshot, key: uuid() };
   try { sessionStorage.setItem('onepay:admin-bonus:' + bonusTarget, JSON.stringify(bonusPending)); } catch {}
   return withBusy(button, async () => {
     try {
@@ -1096,7 +1247,7 @@ async function toggleUserRole(id, role) {
   const u = USERS[id]; if (!u) return;
   const next = role === 'admin' ? 'user' : 'admin';
   const label = next === 'admin' ? '设为管理员' : '取消管理员权限';
-  if (!confirm(`${label}：${u.email}？\n角色变更后该账号现有登录会话会全部失效。${next === 'user' ? '\n其签发的 Agent 配对码和令牌也会失效。' : ''}`)) return;
+  if (!(await askConfirm(`角色变更后该账号现有登录会话会全部失效。${next === 'user' ? '其签发的 Agent 配对码和令牌也会失效。' : ''}`, { kicker: 'PERMISSIONS', title: `${label}：${u.email}`, okLabel: label, danger: next === 'user' }))) return;
   try {
     await api('/api/admin/users/' + encodeURIComponent(id) + '/role', { method: 'POST', body: JSON.stringify({ role: next }) });
     toast(next === 'admin' ? '已设为管理员' : '已取消管理员权限');
@@ -1105,18 +1256,18 @@ async function toggleUserRole(id, role) {
 }
 async function resetPassword(id) {
   const u = USERS[id]; if (!u) return;
-  const pw = prompt('为 ' + u.email + ' 设置新密码（至少 10 位）。\n重置后该账号会话及其签发的 Agent 凭据会失效：'); if (!pw) return;
+  const pw = await askPassword({ title: '为 ' + u.email + ' 设置新密码', message: '重置后该账号的所有会话及其签发的 Agent 凭据都会失效，用户需要重新登录。' }); if (!pw) return;
   try { const d = await api('/api/admin/users/' + encodeURIComponent(id) + '/reset-password', { method: 'POST', body: JSON.stringify({ password: pw }) }); toast(d.message || '密码已重置'); loadUsers(); } catch (e) { toast(e.message); }
 }
 async function toggleUser(id, disabled) {
   const u = USERS[id]; if (!u) return;
-  if (!confirm((disabled ? '停用' : '启用') + '账号 ' + u.email + '？' + (disabled ? '\n该用户所有会话及其签发的 Agent 配对码和令牌会失效。' : ''))) return;
+  if (!(await askConfirm(disabled ? '该用户所有会话及其签发的 Agent 配对码和令牌都会失效。' : '启用后该账号可以重新登录并在前台兑换。', { title: (disabled ? '停用' : '启用') + '账号 ' + u.email, okLabel: disabled ? '停用账号' : '启用账号', danger: disabled }))) return;
   try { await api('/api/admin/users/' + encodeURIComponent(id) + '/status', { method: 'POST', body: JSON.stringify({ disabled: !!disabled }) }); toast(disabled ? '账号已停用' : '账号已启用'); loadUsers(); } catch (e) { toast(e.message); }
 }
 async function deleteUser(id) {
   const u = USERS[id]; if (!u) return;
-  if (!confirm('删除账号 ' + u.email + ' 及其充值 / 订单记录、剩余店铺赠送积分和签发的 Agent 凭据？此操作不可撤销；有待确认订单时不能删除。')) return;
-  if (!confirm('再次确认删除 ' + u.email + ' ？')) return;
+  if (!(await askConfirm('将同时删除充值 / 订单记录、剩余店铺赠送积分和签发的 Agent 凭据。此操作不可撤销；有待确认订单时不能删除。', { kicker: 'DANGER', title: '删除账号 ' + u.email, okLabel: '继续', danger: true }))) return;
+  if (!(await askConfirm('这是最后一次确认，删除后无法恢复。', { kicker: 'DANGER', title: '再次确认删除 ' + u.email, okLabel: '永久删除', danger: true }))) return;
   try { await api('/api/admin/users/' + encodeURIComponent(id), { method: 'DELETE' }); toast('账号已删除'); loadUsers(); } catch (e) { toast(e.message); }
 }
 
@@ -1205,7 +1356,7 @@ async function saveSeriesUpdate(button) {
 }
 async function deleteSeriesUpdate(id) {
   const item = seriesItems[id], target = seriesTarget; if (!item || !target) return;
-  if (!confirm('删除「' + item.title + '」？删除后订阅者将无法在站内查看此更新。')) return;
+  if (!(await askConfirm('删除后订阅者将无法在站内查看此更新，已下载的文件不受影响。', { title: '删除「' + item.title + '」', okLabel: '删除更新', danger: true }))) return;
   try { await api('/api/admin/products/' + encodeURIComponent(target) + '/updates/' + encodeURIComponent(id), { method: 'DELETE' });
     toast('更新已删除'); if (target === seriesTarget) { if ($('#uId').value === id) resetSeriesEditor(); await loadSeries(seriesOffset); }
   } catch (error) { toast(error.message); }
@@ -1334,7 +1485,7 @@ async function loadAgentTokens(button, append = false) {
 }
 $('#agentTokens').addEventListener('click', async event => {
   const button = event.target.closest('[data-agent-revoke]'); if (!button) return;
-  if (!confirm('撤销后该 Agent 将无法继续上传和创建草稿，需要重新配对。确定撤销？')) return;
+  if (!(await askConfirm('撤销后该 Agent 将无法继续上传和创建草稿，需要重新配对。', { kicker: 'AGENT', title: '撤销 Agent 密钥', okLabel: '撤销密钥', danger: true }))) return;
   return withBusy(button, async () => {
     try { await api('/api/admin/agent/tokens/' + encodeURIComponent(button.dataset.agentRevoke), { method: 'DELETE' }); toast('Agent 密钥已撤销'); await loadAgentTokens(); }
     catch (e) { toast(e.message); }
@@ -1348,10 +1499,48 @@ async function saveWebhook(enabled) {
   catch (e) { pretty($('#webhookState'), e.data || { error: e.message }); toast(e.message); }
 }
 async function rotateWebhook() {
-  if (!confirm('轮换会立即使新签名密钥生效。请确认准备更新 Worker Secret。')) return;
+  if (!(await askConfirm('轮换会立即使新签名密钥生效，旧密钥立刻失效。请先准备好更新 Worker Secret。', { kicker: 'WEBHOOK', title: '轮换签名密钥', okLabel: '轮换密钥', danger: true }))) return;
   try { const d = await api('/api/admin/webhook/rotate', { method: 'POST', body: '{}' }); showSecret(d.secret); toast('签名密钥已轮换，仅显示本次'); } catch (e) { toast(e.message); }
 }
-function showSecret(secret) { const box = $('#secretBox'); box.classList.remove('hidden'); box.textContent = '仅本次可见的新密钥（请立即保存为 Cloudflare Secret YIRENFU_WEBHOOK_SECRET）： ' + secret; }
+// Secrets are shown once. Render them with a copy button and wipe them from the
+// DOM after two minutes so a forgotten tab does not leak the value.
+function showSecret(secret) {
+  const box = $('#secretBox');
+  const value = String(secret || '');
+  box.classList.remove('hidden');
+  box.innerHTML = `<b>仅本次可见的新密钥</b>
+    <p class="sub" style="margin:6px 0 10px">请立即保存为 Cloudflare Secret <code>YIRENFU_WEBHOOK_SECRET</code>。本条会在 2 分钟后自动清除，关闭页面后也无法再次查看。</p>
+    <code id="secretValue" style="display:block;padding:10px;background:#fff;border:1px solid #dfe5dd;border-radius:8px;word-break:break-all;user-select:all">${esc(value)}</code>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn sm" type="button" onclick="copySecret()">复制密钥</button>
+      <button class="btn sm secondary" type="button" onclick="hideSecret()">我已保存，立即清除</button>
+    </div>`;
+  clearTimeout(showSecret.timer);
+  showSecret.timer = setTimeout(hideSecret, 120000);
+  if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
+}
+function hideSecret() {
+  clearTimeout(showSecret.timer);
+  const box = $('#secretBox');
+  if (!box) return;
+  box.innerHTML = '';
+  box.classList.add('hidden');
+}
+async function copySecret() {
+  const value = $('#secretValue')?.textContent || '';
+  if (!value) return;
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(value); toast('已复制，请粘贴到 wrangler secret put'); return; }
+    throw new Error('no clipboard');
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = value; area.style.position = 'fixed'; area.style.opacity = '0';
+    document.body.append(area); area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    toast(ok ? '已复制，请粘贴到 wrangler secret put' : '复制失败，请手动选中密钥');
+  }
+}
 function srcLabel(t) { return ({ database: '后台保存', secret: 'Worker Secret', none: '未配置' })[t] || t; }
 function renderSecurity(s) {
   $('#apiKeyState').textContent = '当前 API Key：' + (s.apiKeyMasked ? s.apiKeyMasked + ' · ' + srcLabel(s.apiKeySource) : '未配置');
@@ -1367,7 +1556,7 @@ async function saveHookSecret() {
   try { renderSecurity(await api('/api/admin/webhook-secret', { method: 'POST', body: JSON.stringify({ value: v }) })); $('#hookInput').value = ''; toast('签名密钥已保存并生效'); loadStatus(); } catch (e) { toast(e.message); }
 }
 async function clearSecret(kind) {
-  if (!confirm('清除后台保存的值并回退到 Worker Secret？')) return;
+  if (!(await askConfirm('清除后台保存的值后，将回退使用 Worker Secret 中的配置。', { kicker: 'SECRETS', title: '清除并回退 Worker Secret', okLabel: '清除', danger: true }))) return;
   try { renderSecurity(await api('/api/admin/' + kind, { method: 'POST', body: JSON.stringify({ clear: true }) })); toast('已清除，回退 Worker Secret'); loadStatus(); } catch (e) { toast(e.message); }
 }
 async function loadAudit() {

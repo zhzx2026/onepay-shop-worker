@@ -135,3 +135,16 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   .agent-token-row { flex-wrap: wrap; }
   .agent-token-details { flex: 1 1 65%; }
 }
+
+/* Orders / users paging controls and the status filter. */
+.selectbox { min-width:150px; min-height:40px; padding:9px 12px; border:1px solid #eae6ee; border-radius:9px; outline:none; background:#fff; color:#615a68; font-size:12px; }
+.selectbox:focus { border-color:#a895e4; box-shadow:0 0 0 4px rgba(112,88,207,.08); }
+.pager { display:flex; align-items:center; gap:10px; }
+.pager .state { flex:1; min-width:auto; text-align:center; }
+@media(max-width:600px) { .selectbox { width:100%; } .pager { flex-wrap:wrap; } .pager .btn { flex:1; } }
+
+/* Shared confirm / prompt dialog — replaces native confirm() and prompt(). */
+.ask-dialog { max-width:520px; }
+.ask-message { margin:0 0 16px; color:#6f6673; line-height:1.75; white-space:pre-line; }
+.ask-dialog .field { margin:0 0 14px; }
+.ask-dialog .actions { margin-top:16px; }

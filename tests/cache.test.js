@@ -247,6 +247,10 @@ function catalogDatabase(role = 'user') {
           if (sql.startsWith('SELECT * FROM orders WHERE idempotency_key=')) return orders.get(args[0]) || null;
           if (sql.startsWith('SELECT idempotency_key FROM orders WHERE user_id=')) return [...orders.values()].find(order => order.user_id === args[0] && order.product_id === args[1] && order.status === 'PENDING') || null;
           if (sql.startsWith('SELECT * FROM consumption_jobs WHERE idempotency_key=')) return jobs.get(args[0]) || null;
+          if (sql.startsWith('SELECT COUNT(*) AS total')) {
+            const list = [...orders.values()];
+            return { total: list.length, delivered: list.filter(order => order.status === 'DELIVERED').length, pending: list.filter(order => order.status === 'PENDING').length };
+          }
           throw new Error('Unexpected first: ' + sql);
         },
         async all() {

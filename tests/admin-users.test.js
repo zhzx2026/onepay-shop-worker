@@ -13,7 +13,7 @@ function makeList(data) {
   const context = vm.createContext({
     $: selector => nodes[selector.slice(1)],
     rememberRaw: () => {}, esc: value => String(value ?? ''), fmt: value => value || '—',
-    confirm: () => true, toast: message => messages.push(message),
+    askConfirm: async () => true, toast: message => messages.push(message),
     api: async (path, options) => {
       calls.push({ path, options });
       if (path.startsWith('/api/admin/users?')) return data;
