@@ -6,9 +6,15 @@ export const PUBLIC_CACHE_POLICIES = Object.freeze({
   '/api/product': { scope: 'plans', edgeTtl: 60, browserTtl: 10 },
 });
 
+// Single-product reads share the catalog generation with the shelf, so
+// publishing or editing a product invalidates both through one rotation.
+const PRODUCT_DETAIL_PATTERN = /^\/api\/products\/[A-Za-z0-9_-]{1,64}$/;
+
 const CACHE_NAMESPACE = '/.onepay-cache/v3';
 const GENERATION_TTL = 86400;
-const PUBLIC_PAGES = new Set(['/', '/index.html', '/shop', '/shop.html', '/account', '/account.html']);
+const PUBLIC_PAGES = new Set([
+  '/', '/index.html', '/shop', '/shop.html', '/account', '/account.html', '/product', '/product.html', '/404.html',
+]);
 const STATIC_FILES = new Set(['/storefront.css', '/storefront.js', '/admin.css']);
 
 function edgeCache() {
@@ -22,6 +28,10 @@ function generationKey(origin, scope) {
 // Keep the public cache key and catalog filtering in lockstep for repeated tags.
 export function productTagFilters(params) {
   return [...new Set(params.getAll('tag').map(value => String(value).trim().slice(0, 24)).filter(Boolean))].sort().slice(0, 8);
+}
+
+export function policyFor(pathname) {
+  return PUBLIC_CACHE_POLICIES[pathname] || (PRODUCT_DETAIL_PATTERN.test(pathname) ? PUBLIC_CACHE_POLICIES['/api/products'] : null);
 }
 
 function dataKey(request, generation) {
@@ -97,7 +107,7 @@ function isRefresh(request) {
 
 export async function cachedPublicJson(request, produce, ctx) {
   const url = new URL(request.url);
-  const policy = PUBLIC_CACHE_POLICIES[url.pathname];
+  const policy = policyFor(url.pathname);
   if (request.method !== 'GET' || !policy) return produce();
 
   const cache = edgeCache();

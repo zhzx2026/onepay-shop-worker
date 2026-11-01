@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f8f7fc">
+<link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
+<title>页面走丢了 · 云端积分商店</title>
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
+</head>
+<body>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="/" aria-label="返回首页">
+      <img class="brand-mark" src="/assets/brand-logo.svg" alt="">
+      <span class="brand-copy"><strong data-site-name>云端积分商店</strong><small>THE DIGITAL GOODS STORE</small></span>
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a class="nav-link" data-nav="home" href="/">首页</a>
+      <a class="nav-link" data-nav="shop" href="/shop">探索商品</a>
+      <a class="nav-link" data-nav="account" href="/account">个人中心</a>
+    </nav>
+    <div class="header-side">
+      <a class="account-link" href="/account"><span class="account-dot" data-account-dot aria-hidden="true">↗</span><span data-account-label>登录 / 注册</span></a>
+    </div>
+  </div>
+</header>
+
+<main class="container account-wrap">
+  <div class="breadcrumb"><a href="/">首页</a><span>/</span><b>页面不存在</b></div>
+  <section class="auth-layout notfound-layout">
+    <div class="auth-aside">
+      <div class="auth-aside-copy">
+        <div class="auth-kicker"><span>✳</span> 404 · NOT FOUND</div>
+        <h1>这一页，<br>好像被搬走了。</h1>
+        <p>链接可能已经失效，或者商品已经下架。<br>回商店逛逛，喜欢的东西还在这里。</p>
+        <div class="actions" style="margin-top:20px">
+          <a class="sbtn primary" href="/shop">去探索商品 <span aria-hidden="true">↗</span></a>
+          <a class="sbtn" href="/">返回首页</a>
+        </div>
+      </div>
+      <div class="auth-art" aria-hidden="true"><span class="auth-art-star">✳</span><span class="auth-art-orbit"></span></div>
+    </div>
+    <div class="auth-card">
+      <div class="form-kicker"><span>MAYBE YOU NEED</span><span>✦</span></div>
+      <h2>接下来可以</h2>
+      <div class="info-list">
+        <a class="info-row" href="/shop"><span>浏览全部商品</span><b>↗</b></a>
+        <a class="info-row" href="/account?tab=orders"><span>查看我的已购</span><b>↗</b></a>
+        <a class="info-row" href="/account?tab=recharge"><span>充值积分</span><b>↗</b></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-bottom"><span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span><span>用一点积分，兑换一点喜欢。 &nbsp; ✦</span></div>
+</footer>
+<script src="/storefront.js?v=20261101-1"></script>
+<script>
+document.getElementById('year').textContent = new Date().getFullYear();
+Store.initChrome('shop');
+</script>
+</body>
+</html>

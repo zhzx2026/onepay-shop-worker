@@ -14,7 +14,7 @@ const sqliteTest = (name, fn) => test(name, { skip: !DatabaseSync && 'requires N
 async function makeDb({ beforeSubscriptionMigration = false } = {}) {
   const raw = new DatabaseSync(':memory:');
   const migrations = ['0001_init.sql', '0002_users_and_admin.sql', '0003_products_and_orders.sql', '0004_user_admin_roles.sql', '0005_categories_and_tags.sql', '0006_bonus_points.sql', '0007_catalog_agent.sql'];
-  if (!beforeSubscriptionMigration) migrations.push('0008_subscriptions_and_repeat.sql', '0009_agent_pairing.sql');
+  if (!beforeSubscriptionMigration) migrations.push('0008_subscriptions_and_repeat.sql', '0009_agent_pairing.sql', '0010_auth_throttle.sql');
   for (const name of migrations) {
     raw.exec(await readFile(new URL('../migrations/' + name, import.meta.url), 'utf8'));
   }

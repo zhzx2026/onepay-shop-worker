@@ -98,7 +98,7 @@ test('site name and active navigation are updated without duplicating the defaul
 });
 
 test('inline scripts in all pages parse successfully', async () => {
-  for (const name of ['index.html', 'shop.html', 'account.html', 'admin.html']) {
+  for (const name of ['index.html', 'shop.html', 'account.html', 'product.html', '404.html', 'admin.html']) {
     const html = await readFile(new URL(`../public/${name}`, import.meta.url), 'utf8');
     const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
     for (const [, code] of scripts) if (code.trim()) assert.doesNotThrow(() => new vm.Script(code, { filename: name }));
@@ -114,12 +114,13 @@ test('only public GET requests use the browser cache and explicit refresh bypass
   await store.api('/api/orders', { cache: 'force-cache' });
   await store.api('/api/products', { cache: 'no-store' });
   await store.api('/api/products/one/purchase', { method: 'POST', body: '{}' });
-  assert.deepEqual(requests.map(item => item.options.cache), ['default', 'default', 'no-store', 'no-store', 'no-store', 'no-store']);
+  await store.api('/api/products/prd_abc');
+  assert.deepEqual(requests.map(item => item.options.cache), ['default', 'default', 'no-store', 'no-store', 'no-store', 'no-store', 'default']);
 });
 
 test('storefront pages use matching versioned CSS and JavaScript assets', async () => {
   let version;
-  for (const name of ['index.html', 'shop.html', 'account.html']) {
+  for (const name of ['index.html', 'shop.html', 'account.html', 'product.html', '404.html']) {
     const html = await readFile(new URL(`../public/${name}`, import.meta.url), 'utf8');
     const cssVersion = html.match(/href="\/storefront\.css\?v=([^"]+)"/)?.[1];
     const jsVersion = html.match(/src="\/storefront\.js\?v=([^"]+)"/)?.[1];
@@ -192,4 +193,35 @@ test('modal focus is contained and restored, and an in-flight modal cannot close
   assert.ok(!modalClasses.has('show')); assert.ok(!bodyClasses.has('modal-open')); assert.equal(document.activeElement, trigger);
   const css = await readFile(new URL('../public/storefront.css', import.meta.url), 'utf8');
   assert.match(css, /\.modal\.show\s*\{[^}]*visibility:\s*visible[^}]*transition:[^}]*visibility\s+0s/);
+});
+
+test('catalog cards open the product detail page instead of a title search', async () => {
+  const shop = await readFile(new URL('../public/shop.html', import.meta.url), 'utf8');
+  const home = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  for (const [name, page] of [['shop.html', shop], ['index.html', home]]) {
+    assert.match(page, /href="\$\{esc\(productHref\((?:product|item)\.id\)\)\}"/, `${name} should link cards to /product?id=`);
+    assert.doesNotMatch(page, /href="\/shop\?q=\$\{encodeURIComponent\(product\.title\)\}/, `${name} should not fall back to a title search`);
+  }
+  assert.match(shop, /class="product-title-link"/);
+  assert.match(shop, /class="detail-link"/);
+});
+
+test('the personal centre shows lifetime spend and a self-service password form', async () => {
+  const account = await readFile(new URL('../public/account.html', import.meta.url), 'utf8');
+  assert.ok(!account.includes('data.used'), 'the API never returned `used`; the page must use spent_points');
+  assert.match(account, /data\.spent_points/);
+  assert.match(account, /data\.order_count/);
+  assert.match(account, /id="passwordForm"/);
+  assert.match(account, /\/api\/auth\/password/);
+  assert.ok(!/onclick="buyPoints\(/.test(account), 'package buttons must not interpolate SKUs into inline handlers');
+  assert.match(account, /data-sku="/);
+});
+
+test('administrator order list offers filters and paging wired to the API', async () => {
+  const admin = await readFile(new URL('../public/admin.html', import.meta.url), 'utf8');
+  assert.match(admin, /id="orderQuery"/);
+  assert.match(admin, /id="orderStatus"/);
+  assert.match(admin, /id="ordersPrev"/);
+  assert.match(admin, /id="ordersNext"/);
+  assert.match(admin, /\/api\/admin\/orders\?' \+ params/);
 });

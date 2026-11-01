@@ -7,7 +7,9 @@
     const headers = { ...(options.headers || {}) };
     if (options.body !== undefined && !(options.body instanceof FormData)) headers['content-type'] = 'application/json';
     const method = String(options.method || 'GET').toUpperCase();
-    const publicRead = method === 'GET' && /^\/api\/(?:products|categories|config|product)(?:\?|$)/.test(path);
+    // Reads that are identical for every visitor may use the browser cache;
+    // `/api/products/<id>` is the public single-product detail endpoint.
+    const publicRead = method === 'GET' && /^\/api\/(?:products(?:\/[A-Za-z0-9_-]{1,64})?|categories|config|product)(?:\?|$)/.test(path);
     const response = await fetch(path, { ...options, cache: publicRead ? (options.cache ?? 'default') : 'no-store', headers });
     let data = {};
     try { data = await response.json(); } catch {}
@@ -85,7 +87,18 @@
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
   }
 
-  async function initChrome(active = '') {
+  const productHref = id => '/product?id=' + encodeURIComponent(String(id || ''));
+
+  // Purchase failures that need an action, not just a message.
+  function purchaseHint(error) {
+    const code = error?.data?.error_code || '';
+    if (code === 'ORDER_ALREADY_PENDING' || code === 'CONSUME_UNKNOWN') return { message: error.message, action: { label: '去「我的已购」同步', href: '/account?tab=orders' } };
+    if (code === 'POINTS_INSUFFICIENT') return { message: error.message, action: { label: '去充值积分', href: '/account?tab=recharge' } };
+    if (code === 'ALREADY_PURCHASED' || code === 'ALREADY_SUBSCRIBED') return { message: error.message, action: { label: '查看我的已购', href: '/account?tab=orders' } };
+    return { message: error?.message || '兑换失败，请稍后重试', action: null };
+  }
+
+  async function initChrome(active = '', options = {}) {
     const [configResult, authResult] = await Promise.allSettled([api('/api/config'), api('/api/auth/me')]);
     const config = configResult.status === 'fulfilled' ? configResult.value : {};
     const auth = authResult.status === 'fulfilled' ? authResult.value : {};
@@ -103,6 +116,12 @@
     });
     $$('[data-account-label]').forEach(node => { node.textContent = me ? '个人中心' : '登录 / 注册'; });
     $$('[data-account-dot]').forEach(node => { node.textContent = me ? (me.email || 'U').slice(0, 1).toUpperCase() : '→'; });
+    // The header balance chip used to stay hidden on every page that did not
+    // happen to load /api/access itself (the home page never did).
+    if (me && options.points !== false) {
+      const access = await api('/api/access').catch(() => null);
+      if (access && Number.isFinite(Number(access.total_points))) setPoints(Number(access.total_points));
+    }
     return { config, me };
   }
 
@@ -157,7 +176,7 @@
   function setPoints(points) {
     const valid = points !== null && points !== undefined && Number.isFinite(Number(points));
     $$('[data-points-wrap]').forEach(node => node.classList.toggle('hidden', !valid));
-    if (valid) $$('[data-points]').forEach(node => { node.textContent = Number(points); });
+    if (valid) $$('[data-points]').forEach(node => { node.textContent = Number(points).toLocaleString('zh-CN'); });
   }
 
   function deliveryHtml(delivery) {
@@ -226,5 +245,5 @@
     return new URLSearchParams(location.search);
   }
 
-  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, copyText, query };
+  window.Store = { $, $$, esc, api, toast, withBusy, setModal, fmtTime, initChrome, categoryIds, filterProducts, productCover, productHref, purchaseHint, setPoints, deliveryHtml, catalogTreeHtml, copyText, query };
 })();

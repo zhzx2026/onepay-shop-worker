@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>管理后台 · 积分商店</title>
-<link rel="stylesheet" href="/admin.css?v=20261101-2">
+<link rel="stylesheet" href="/admin.css?v=20261101-3">
 </head>
 <body>
 
@@ -235,9 +235,24 @@
     <section class="view hidden" id="view-orders">
       <div class="panel">
         <div class="panel-title"><h2>成交订单</h2><button class="raw-trigger" data-raw-for="ordersOut" onclick="openRaw('ordersOut')" disabled>查看原数据 ↗</button></div>
-        <p class="sub">积分兑换记录。仅「已交付」的订单会展示交付内容；订单交付内容为快照，修改商品不会影响已购用户。</p>
-        <div class="actions" style="margin:0 0 12px"><button class="btn secondary" onclick="loadOrders()">刷新订单</button></div>
+        <p class="sub">积分兑换记录。仅「已交付」的订单会展示交付内容；订单内容为快照，修改商品不会影响已购用户。</p>
+        <div class="actions toolbar" style="margin:0 0 10px">
+          <input id="orderQuery" class="searchbox" placeholder="订单号 / 邮箱 / 商品名" maxlength="64" onkeydown="if(event.key==='Enter')loadOrders(0)">
+          <select id="orderStatus" class="selectbox" onchange="loadOrders(0)" aria-label="按状态筛选">
+            <option value="">全部状态</option>
+            <option value="PENDING">待确认</option>
+            <option value="DELIVERED">已交付</option>
+            <option value="FAILED">失败</option>
+          </select>
+          <button class="btn" onclick="loadOrders(0)">查询</button>
+          <button class="btn secondary" onclick="resetOrderFilters()">重置</button>
+        </div>
+        <div class="state" id="ordersMeta" style="margin-bottom:10px">尚未加载</div>
         <div id="ordersOut"><div class="state">正在加载订单…</div></div>
+        <div class="actions" style="margin-top:12px">
+          <button class="btn secondary" id="ordersPrev" onclick="loadOrders(orderOffset-50)" disabled>上一页</button>
+          <button class="btn secondary" id="ordersNext" onclick="loadOrders(orderOffset+50)" disabled>下一页</button>
+        </div>
       </div>
     </section>
 
@@ -401,14 +416,14 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 function toast(t) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 3200); }
 async function withBusy(button, task) {
   if (!button) return task();
+  // A disabled control has no enabled state to restore, so it is left alone.
   if (button.disabled) return;
-  const wasDisabled = button.disabled;
   button.disabled = true;
   button.classList.add('is-loading');
   button.setAttribute('aria-busy', 'true');
   try { return await task(); }
   finally {
-    button.disabled = wasDisabled;
+    button.disabled = false;
     button.classList.remove('is-loading');
     button.removeAttribute('aria-busy');
   }
@@ -707,6 +722,7 @@ function renderGoods(items) {
         <td data-label="状态">${p.status === 'ACTIVE' ? '<span class="pill ok">上架</span>' : '<span class="pill off">下架</span>'}</td>
         <td class="row-actions" data-label="操作">
           <button class="rowbtn primary-row" onclick="editGoods('${p.id}')">编辑</button>
+          <a class="rowbtn" href="/product?id=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">预览 ↗</a>
           ${p.product_kind === 'SUBSCRIPTION' ? `<button class="rowbtn" onclick="openSeries('${p.id}')">系列更新</button>` : ''}
           <button class="rowbtn" onclick="toggleGoods('${p.id}')">${p.status === 'ACTIVE' ? '下架' : '上架'}</button>
           <button class="rowbtn danger" onclick="deleteGoods('${p.id}')">删除</button>
@@ -997,12 +1013,30 @@ async function deleteGoods(id) {
 }
 
 /* ---------- 订单 ---------- */
-async function loadOrders() {
+let orderOffset = 0;
+function resetOrderFilters() {
+  $('#orderQuery').value = ''; $('#orderStatus').value = '';
+  loadOrders(0);
+}
+async function loadOrders(offset) {
+  if (typeof offset === 'number') orderOffset = Math.max(0, offset);
+  const q = ($('#orderQuery')?.value || '').trim();
+  const status = $('#orderStatus')?.value || '';
   try {
-    const d = await api('/api/admin/orders?limit=50');
+    const params = new URLSearchParams({ limit: '50', offset: String(orderOffset) });
+    if (q) params.set('q', q);
+    if (status) params.set('status', status);
+    const d = await api('/api/admin/orders?' + params);
     rememberRaw('ordersOut', d);
     ORDERS = d.items || [];
-    if (!ORDERS.length) { $('#ordersOut').innerHTML = '<div class="state">还没有成交订单。</div>'; return; }
+    const meta = $('#ordersMeta');
+    if (meta) {
+      const range = ORDERS.length ? `${orderOffset + 1}–${orderOffset + ORDERS.length}` : '0';
+      meta.textContent = `共 ${Number(d.total || 0)} 笔${q || status ? '（已筛选）' : ''} · 当前显示 ${range}${d.pending_total ? ` · 其中待确认 ${d.pending_total} 笔` : ''}`;
+    }
+    if ($('#ordersPrev')) $('#ordersPrev').disabled = orderOffset === 0;
+    if ($('#ordersNext')) $('#ordersNext').disabled = !d.has_more;
+    if (!ORDERS.length) { $('#ordersOut').innerHTML = `<div class="state">${q || status ? '没有符合条件的订单。' : '还没有成交订单。'}</div>`; return; }
     $('#ordersOut').innerHTML = `<table><thead><tr>
       <th>订单号</th><th>商品</th><th>用户</th><th>积分</th><th>状态</th><th>时间</th>
     </tr></thead><tbody>${ORDERS.map(o => `<tr>

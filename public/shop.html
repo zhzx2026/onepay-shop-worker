@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>全部商品 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -119,9 +119,9 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-1"></script>
 <script>
-const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, setPoints, deliveryHtml, catalogTreeHtml, query } = Store;
+const { $, $$, esc, api, toast, withBusy, setModal, initChrome, categoryIds, filterProducts, productCover, productHref, purchaseHint, setPoints, deliveryHtml, catalogTreeHtml, query } = Store;
 let me = null, points = null, products = [], categories = [];
 let authReady = false, accessReady = false, catalogLoaded = false, isAdmin = false;
 let library = { owned_product_ids: [], subscriptions: [] }, libraryReady = false, libraryFailed = false;
@@ -143,7 +143,7 @@ const state = {
   category: params.get('category') || '',
   tags: [...new Set(params.getAll('tag').map(tag => tag.trim().slice(0, 24)).filter(Boolean))].sort().slice(0, 8),
   q: params.get('q') || '',
-  sort: 'recommended'
+  sort: ['recommended', 'price-asc', 'price-desc', 'newest'].includes(params.get('sort')) ? params.get('sort') : 'recommended'
 };
 
 const categoryById = id => categories.find(item => item.id === id);
@@ -159,6 +159,7 @@ function syncUrl() {
   if (state.category) next.set('category', state.category);
   state.tags.forEach(tag => next.append('tag', tag));
   if (state.q) next.set('q', state.q);
+  if (state.sort && state.sort !== 'recommended') next.set('sort', state.sort);
   history.replaceState(null, '', next.toString() ? `/shop?${next}` : '/shop');
 }
 
@@ -216,17 +217,17 @@ function renderProducts() {
     const subLabel = sub ? (sub.permanent ? '永久订阅' : (subscriptionActive(sub) ? '订阅中' : '已到期')) : '';
     const seriesInfo = series ? `<div class="product-series"><span>↻ 系列订阅</span><span>${Number(product.subscription_days) ? Number(product.subscription_days) + ' 天 · 手动续费' : '永久有效'}</span><span>${esc(frequencyLabel(product.update_frequency))}</span></div>` : '';
     return `<article class="product-card">
-      ${cover}
+      <a class="product-cover-link" href="${esc(productHref(product.id))}" tabindex="-1" aria-hidden="true">${cover}</a>
       <div class="product-body">
         <div class="product-cat">${esc(category)} ${subLabel ? `<span class="owned-badge">${esc(subLabel)}</span>` : owned ? '<span class="owned-badge">已拥有</span>' : ''}</div>
-        <h3>${esc(product.title)}</h3>
+        <h3><a class="product-title-link" href="${esc(productHref(product.id))}">${esc(product.title)}</a></h3>
         <p class="summary">${esc(product.summary || '')}</p>
         ${seriesInfo}
         <div class="product-tags">${(product.tags || []).slice(0, 4).map(tag => `<button class="product-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('')}</div>
         ${(product.preview_files || []).length ? `<button class="catalog-trigger" data-preview="${esc(product.id)}"><span aria-hidden="true">▤</span> 查看资源目录 <small>${product.preview_files.length} 项${product.preview_truncated ? ' · 部分' : ''}</small><b aria-hidden="true">↗</b></button>` : ''}
         ${isAdmin ? `<a class="admin-edit-link" href="/admin?edit=${encodeURIComponent(product.id)}">✎ 编辑商品</a>` : ''}
         <div class="product-footer">
-          <div><div class="price">${Number(product.price_points)} <small>积分</small></div><div class="stock-note">${product.stock === null || product.stock === undefined ? '不限量' : soldOut ? '已售罄' : '剩余 ' + Number(product.stock)}</div></div>
+          <div><div class="price">${Number(product.price_points)} <small>积分</small></div><div class="stock-note">${product.stock === null || product.stock === undefined ? '不限量' : soldOut ? '已售罄' : '剩余 ' + Number(product.stock)} · <a class="detail-link" href="${esc(productHref(product.id))}">查看详情</a></div></div>
           ${viewOwned ? `<a class="sbtn sm soft" href="/account?tab=${series ? 'subscriptions&product=' + encodeURIComponent(product.id) : 'orders'}">${series ? '查看订阅' : '查看已购'} ↗</a>`
             : libraryFailed && me && !checkingAccount ? '<button class="sbtn sm" data-retry-library>重试账户状态 ↻</button>'
             : `<button class="sbtn sm ${enough === false ? '' : 'primary'}" ${soldOut || checkingAccount ? 'disabled' : ''} data-buy="${esc(product.id)}">${label} <span aria-hidden="true">↗</span></button>`}
@@ -308,7 +309,7 @@ function buyProduct(id) {
   }
   const previous = storedPurchase(id);
   if (!previous.key && points !== null && points < Number(product.price_points)) {
-    toast('积分不足，请先在个人中心充值'); setTimeout(() => { location.href = '/account?tab=recharge'; }, 600); return;
+    toast('积分不足，可在个人中心充值后再兑换'); return;
   }
   const quote = previous.quote || { expected_price: Number(product.price_points), expected_kind: series ? 'SUBSCRIPTION' : 'SINGLE',
     expected_days: series ? Number(product.subscription_days || 0) : 0, subscription_revision: series ? (sub?.revision || 'none') : null };
@@ -352,7 +353,9 @@ async function submitPurchase(button) {
     } catch (error) {
       if (error.status && error.status < 500) { try { sessionStorage.removeItem(slot); sessionStorage.removeItem(slot + ':quote'); } catch {} }
       setPurchaseBusy(false); setModal('#purchaseModal', false);
-      toast(error.status ? error.message : '兑换结果暂不确定，请使用原编号重试或在「我的已购」同步');
+      const hint = purchaseHint(error);
+      toast(error.status ? hint.message : '兑换结果暂不确定，请使用原编号重试或在「我的已购」同步');
+      if (hint.action) setTimeout(() => { location.href = hint.action.href; }, 700);
       await refreshAfterPurchase();
     } finally { purchaseInFlight = false; setPurchaseBusy(false); }
   });
@@ -399,7 +402,7 @@ $('#productGrid').addEventListener('click', event => {
   const preview = event.target.closest('[data-preview]');
   const retry = event.target.closest('[data-retry-library]');
   if (tag) toggleTag(tag.dataset.tag);
-  else if (buy) buyProduct(buy.dataset.buy, buy);
+  else if (buy) buyProduct(buy.dataset.buy);
   else if (preview) showCatalog(preview.dataset.preview);
   else if (retry) retryLibrary();
   else if (clear) clearFilter(clear.dataset.clear, clear.dataset.value);
@@ -414,9 +417,11 @@ $('#searchInput').addEventListener('input', event => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(applyState, 160);
 });
+$('#sortSelect').value = state.sort;
 $('#sortSelect').addEventListener('change', event => {
   state.sort = event.target.value;
   renderProducts();
+  syncUrl();
 });
 $('#searchInput').value = state.q;
 $('#year').textContent = new Date().getFullYear();
@@ -430,7 +435,7 @@ $('#year').textContent = new Date().getFullYear();
       if (catalogLoaded) renderProducts();
     }
   }).catch(() => {});
-  const chrome = await initChrome('shop');
+  const chrome = await initChrome('shop', { points: false });
   me = chrome.me;
   if (me?.role === 'admin') isAdmin = true;
   authReady = true;

@@ -11,8 +11,9 @@
 ### 前台
 
 - **首页（`/`）**：品牌入口与分类导航，不再直接堆叠商品货架。
-- **商品页（`/shop`）**：独立商品目录，支持按一级分类、二级子分类、多选标签、关键词筛选与积分排序；多个标签需同时满足；父分类自动包含其子分类商品。
-- **个人中心（`/account`）**：注册 / 登录、积分余额、充值套餐、我的已购、我的订阅与账户信息。充值入口只放在个人中心。
+- **商品页（`/shop`）**：独立商品目录，支持按一级分类、二级子分类、多选标签、关键词筛选与积分排序；多个标签需同时满足；父分类自动包含其子分类商品；排序与筛选会写进 URL，可直接分享。
+- **商品详情（`/product?id=<商品编号>`）**：完整商品介绍、标签、库存、交付说明、资源目录快照、相关推荐与同款兑换流程；卡片封面与标题可直接进入，可单独分享给他人。已下架商品的详情接口返回 404。
+- **个人中心（`/account`）**：注册 / 登录、积分余额与累计消费、充值套餐、我的已购（含待确认角标）、我的订阅与账户信息；面板按需加载，已登录用户可自助修改密码。充值入口只放在个人中心。
 - **积分充值**：只读加载一人付当前 `/product` 可售积分套餐，点击后拿 `purchase_url` 跳转支付宝；入口状态不等于支付成功。
 - **积分兑换**：先使用店铺赠送积分；不足部分再用 `/consume` 幂等核销支付宝积分。涉及一人付时，**只有 `status=SUCCEEDED && confirmed=true` 才交付内容**；纯赠送积分订单无需请求一人付。
 - **我的已购**：普通商品交付快照保存在订单中；文本可复制、链接可打开、文件走订单专属下载地址。系列内容在「我的订阅」中按有效期访问。
@@ -30,7 +31,7 @@
   - `文本`：兑换后直接显示文本内容，可复制（适合卡密、提取码、账号信息）。
   - `链接`：兑换后显示可点击链接（适合网盘分享链接、R2 公开域名）。
   - `文件`：后台上传文件到 R2（单文件 ≤ 50MB），用户点「下载文件」时由 Worker 校验登录态与订单归属后流式返回，链接不可被他人复用、不可枚举。
-- **成交订单**：订单号、商品、用户邮箱、消耗积分、交付状态、时间。
+- **成交订单**：按状态筛选、按订单号 / 邮箱 / 商品名搜索，分页显示并给出总数与待确认数量；列表包含订单号、商品、用户邮箱、消耗积分、交付状态、时间。
 - 站点名称 / 说明、一人付 `/capabilities` 与 `/product` 只读联调、平台购买与核销记录、Webhook 配置与签名轮换。
 - **用户管理**：按邮箱搜索，查看身份、会话、订单数和店铺赠送积分；管理员可填写原因增加或扣减赠送积分并查看流水。支持设置角色、重置密码、停用/启用和删除账号；有待确认订单的账号不能删除，删除后保留积分流水供对账。
 - **数据查看**：后台列表与卡片支持小屏幕；右上角「查看原数据」按需加载本地 Monaco（VS Code 同款编辑器），只读展示 JSON。
@@ -52,7 +53,7 @@
 
 ### 升级已有数据库
 
-**新代码依赖 `0006_bonus_points.sql`、`0007_catalog_agent.sql`、`0008_subscriptions_and_repeat.sql` 和 `0009_agent_pairing.sql`；上线前必须先迁移**，否则商品、兑换、订阅、用户管理或 Agent 接口可能报错。`0008` 将旧商品设为不允许重复购买，历史订单视为普通商品订单，不会自动变为订阅；`0009` 新增 Agent 配对、凭据和限流表。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换及后台账号管理，确保**所有旧 Worker 版本停止处理兑换和管理请求**，再应用迁移、部署新版本、验证后恢复流量。旧版管理接口不会撤销新配对的 Agent 凭据，升级期间也不要让旧版处理 Agent / 管理请求。旧代码不能保证新的重复购买和订阅规则，迁移后不可让新旧版本同时处理兑换。未确认的旧订单保留原业务编号查询，不要重建或手工退款；回滚前应暂停兑换并核对新订单及权益，不能直接用旧版代码继续处理订阅。
+**新代码依赖 `0006_bonus_points.sql`、`0007_catalog_agent.sql`、`0008_subscriptions_and_repeat.sql`、`0009_agent_pairing.sql` 和 `0010_auth_throttle.sql`；上线前必须先迁移**，否则商品、兑换、订阅、用户管理或 Agent 接口可能报错。`0008` 将旧商品设为不允许重复购买，历史订单视为普通商品订单，不会自动变为订阅；`0009` 新增 Agent 配对、凭据和限流表；`0010` 新增登录失败计数表与充值入口查询索引（缺失时接口会 fail-open，不会锁死登录，但限流与索引不会生效）。`0009` 存在两个同名编号的迁移文件（`0009_agent_pairing.sql`、`0009_netdisk_scans.sql`），按文件名字典序执行，**不要改名已部署的迁移文件**，新增迁移从 `0010` 起顺延。旧订单的 `bonus_points_used` 默认为 0，不会把历史支付宝扣减当成赠送积分。正式升级应先备份 D1、暂停新兑换及后台账号管理，确保**所有旧 Worker 版本停止处理兑换和管理请求**，再应用迁移、部署新版本、验证后恢复流量。旧版管理接口不会撤销新配对的 Agent 凭据，升级期间也不要让旧版处理 Agent / 管理请求。旧代码不能保证新的重复购买和订阅规则，迁移后不可让新旧版本同时处理兑换。未确认的旧订单保留原业务编号查询，不要重建或手工退款；回滚前应暂停兑换并核对新订单及权益，不能直接用旧版代码继续处理订阅。
 
 ```bash
 # 仅在获得正式上线授权后操作远程数据库
@@ -206,11 +207,15 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | GET | `/api/subscriptions/:product/updates?offset=0` | 有效订阅者读取已发布更新，每页 30 项 |
 | GET | `/api/subscriptions/:product/updates/:update/file` | 校验本人订阅及发布状态后下载系列文件 |
 | POST | `/api/orders/sync` | 同步待确认订单（查 `/consumption`） |
+| GET | `/api/products/:id` | 单个已上架商品详情（不含交付内容），随商品缓存一起失效；下架或不存在返回 404 |
 | GET | `/api/download/:orderKey` | 下载文件交付（需登录且为订单本人） |
 | GET | `/api/product` | 一人付充值套餐（只读） |
 | POST | `/api/purchase` | 创建积分充值购买入口 |
-| GET | `/api/access` | 店铺赠送及支付宝积分分项；支付宝不可用时仍返回店铺余额 |
-| POST | `/api/admin/login` | 管理员账号登录，body `{ email, password }` |
+| GET | `/api/access` | 店铺赠送及支付宝积分分项、`spent_points`（累计消费）、`order_count`（已交付订单）、`pending_orders`（待确认订单）；支付宝不可用时仍返回店铺余额与上述统计 |
+| POST | `/api/auth/register` | 注册普通账号，body `{ email, password }`（密码 10–128 位） |
+| POST | `/api/auth/login` | 账号登录；连续失败会限流 |
+| POST | `/api/auth/password` | 已登录用户修改密码，body `{ current_password, new_password }`；成功后其他设备的会话失效 |
+| POST | `/api/admin/login` | 管理员账号登录，body `{ email, password }`；与前台登录分别限流 |
 | GET | `/api/admin/me` | 当前独立后台会话 |
 | POST | `/api/admin/logout` | 退出后台，不影响前台会话 |
 | GET/POST/PUT/DELETE | `/api/admin/products[/:id]` | 商品管理（含重复购买与订阅规则） |
@@ -227,7 +232,7 @@ npx wrangler d1 execute onepay-shop --remote --config wrangler.toml --command "U
 | POST | `/api/agent/pair` | 用 10 位配对码换取 30 天 Agent Bearer 令牌（匿名、一次性、限流） |
 | POST | `/api/agent/uploads` | Bearer 令牌上传 Agent 文件（multipart） |
 | POST | `/api/agent/drafts` | Bearer 令牌关联已上传文件并创建隐藏草稿（幂等） |
-| GET | `/api/admin/orders` | 成交订单列表 |
+| GET | `/api/admin/orders` | 成交订单列表，支持 `status`（PENDING / DELIVERED / FAILED）、`q`（订单号 / 邮箱 / 商品名 / 业务编号）、`limit`、`offset`，返回 `total`、`pending_total`、`has_more` |
 | POST | `/api/admin/users/:id/role` | 设置管理员角色，body `{ role: "admin" \| "user" }` |
 | GET | `/api/admin/users/:id/bonus` | 店铺赠送积分余额与最近流水 |
 | POST | `/api/admin/users/:id/bonus` | 调整赠送积分，body `{ delta, reason, idempotency_key }`；操作编号可安全重试 |
@@ -290,7 +295,7 @@ curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
 
 | 公开 GET 接口 | 边缘缓存 | 浏览器缓存 |
 | --- | --- | --- |
-| `/api/products`（含 `q`、`category`、`tag` 筛选） | 30 秒 | 5 秒 |
+| `/api/products`（含 `q`、`category`、`tag` 筛选）与 `/api/products/:id` | 30 秒 | 5 秒 |
 | `/api/categories` | 60 秒 | 10 秒 |
 | `/api/config` | 300 秒 | 30 秒 |
 | `/api/product`（充值套餐） | 60 秒 | 10 秒 |
@@ -306,6 +311,8 @@ curl --fail-with-body https://YOUR_SHOP_DOMAIN/api/agent/drafts \
 
 - 前台用户与后台管理员使用不同 Cookie；后台每次请求都会重新校验账号角色与停用状态，降权、停用后旧后台会话立即失效。管理员不能停用当前登录的账号，但仍可停用或启用其他账号。
 - 管理员角色只能由现有管理员在后台授予；新注册账号固定为普通用户，不按邮箱前缀自动提权。
+- 登录、注册、修改密码按「IP + 账号」统计失败次数：15 分钟内超过 8 次返回 429 与 `retry-after`；成功登录清零。计数表缺失时限流自动放行，保证不会被一次迁移遗漏锁在门外。
+- 用户修改密码必须提供当前密码；成功后保留当前设备会话，其他设备会话全部失效。管理员仍可在后台重置任意账号密码并吊销其 Agent 凭据。
 - 前端价格仅用于展示；购买积分只传有效 `sku_id`，不传价格或 plan ID。
 - 兑换商品时扣减数量由服务端按商品当前积分价决定；前端可传预期价格、类型、期限和订阅状态版本作为一致性校验，但不能指定扣费金额。
 - 普通文件下载走 `/api/download/:orderKey`，校验会话 + 订单归属；系列文件下载还需有效订阅及已发布状态。R2 桶无需公开。

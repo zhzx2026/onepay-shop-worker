@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#f8f7fc">
 <link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
 <title>个人中心 · 云端积分商店</title>
-<link rel="stylesheet" href="/storefront.css?v=20261031-5">
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
 </head>
 <body>
 <div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
@@ -75,13 +75,13 @@
     <div class="stats">
       <div class="stat"><span>当前积分 <i>✳</i></span><b id="statPoints">—</b><small id="pointsBreakdown">正在读取积分来源</small></div>
       <div class="stat"><span>已使用积分 <i>↗</i></span><b id="statUsed">—</b><small>累计兑换所用积分</small></div>
-      <div class="stat"><span>已购记录 <i>♡</i></span><b id="statOrders">—</b><small>最近 50 笔中的已交付订单</small></div>
+      <div class="stat"><span>已购记录 <i>♡</i></span><b id="statOrders">—</b><small>累计已交付订单</small></div>
     </div>
 
     <div>
       <div class="account-tabs" role="tablist">
         <button class="account-tab active" id="tab-recharge" role="tab" aria-selected="true" aria-controls="panel-recharge" tabindex="0" data-account-tab="recharge">充值积分</button>
-        <button class="account-tab" id="tab-orders" role="tab" aria-selected="false" aria-controls="panel-orders" tabindex="-1" data-account-tab="orders">我的已购</button>
+        <button class="account-tab" id="tab-orders" role="tab" aria-selected="false" aria-controls="panel-orders" tabindex="-1" data-account-tab="orders">我的已购<span class="tab-badge hidden" id="ordersBadge"></span></button>
         <button class="account-tab" id="tab-subscriptions" role="tab" aria-selected="false" aria-controls="panel-subscriptions" tabindex="-1" data-account-tab="subscriptions">我的订阅</button>
         <button class="account-tab" id="tab-profile" role="tab" aria-selected="false" aria-controls="panel-profile" tabindex="-1" data-account-tab="profile">账户信息</button>
       </div>
@@ -103,7 +103,7 @@
             <div><div class="panel-eyebrow">YOUR COLLECTION</div><h3>我的已购</h3><p>交付内容安全保存在账户中，点击卡片查看，可继续加载历史记录。</p></div>
             <div class="actions">
               <button class="sbtn sm" onclick="syncOrders(this)">同步待确认订单</button>
-              <button class="sbtn sm" onclick="loadOrders(this)">刷新</button>
+              <button class="sbtn sm" onclick="reloadOrders(this)">刷新</button>
             </div>
           </div>
           <div class="order-list" id="orderList"><div class="empty-state">正在加载已购内容…</div></div>
@@ -113,7 +113,7 @@
 
       <div class="account-panel hidden" id="panel-subscriptions" role="tabpanel" aria-labelledby="tab-subscriptions">
         <div class="panel-box subscription-panel">
-          <div class="panel-head"><div><div class="panel-eyebrow">YOUR SERIES</div><h3>我的订阅</h3><p>有效期内可查看历史及最新更新，到期后可手动续订。</p></div><button class="sbtn sm" onclick="loadSubscriptions(this)">刷新订阅</button></div>
+          <div class="panel-head"><div><div class="panel-eyebrow">YOUR SERIES</div><h3>我的订阅</h3><p>有效期内可查看历史及最新更新，到期后可手动续订。</p></div><button class="sbtn sm" onclick="reloadSubscriptions(this)">刷新订阅</button></div>
           <div class="subscription-list" id="subscriptionList"><div class="empty-state">正在读取订阅…</div></div>
           <div class="subscription-notice">订阅不会自动扣费。站内访问会在到期后停止；已下载文件或已复制的外部链接无法由本站收回。</div>
         </div>
@@ -131,7 +131,14 @@
             <a class="sbtn" id="adminLink" href="/admin" target="_blank" rel="noopener">进入管理后台</a>
             <button class="sbtn" onclick="logout()">退出登录</button>
           </div>
-          <div class="notice-line" style="margin-top:14px">如需修改账号密码，请联系管理员在后台重置。</div>
+          <div class="panel-head" style="margin-top:22px"><div><h3>修改密码</h3><p>修改后其他设备上的登录会退出，当前设备保持登录。</p></div></div>
+          <form id="passwordForm" class="form-stack" onsubmit="changePassword(event)">
+            <div class="field"><label for="currentPassword">当前密码</label><input id="currentPassword" type="password" autocomplete="current-password" required></div>
+            <div class="field"><label for="newPassword">新密码（至少 10 位）</label><input id="newPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></div>
+            <div class="field"><label for="confirmPassword">再次输入新密码</label><input id="confirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></div>
+            <button class="sbtn primary" id="passwordSubmit" type="submit">更新密码</button>
+          </form>
+          <div class="notice-line" style="margin-top:14px">忘记密码时，请联系管理员在后台重置。</div>
         </div>
       </div>
     </div>
@@ -180,7 +187,7 @@
   </div>
 </div>
 
-<script src="/storefront.js?v=20261031-5"></script>
+<script src="/storefront.js?v=20261101-1"></script>
 <script>
 const { $, $$, esc, api, toast, withBusy, setModal, initChrome, setPoints, deliveryHtml, fmtTime, query } = Store;
 let me = null, points = null, authMode = 'login';
@@ -197,6 +204,17 @@ function showAuth() {
   $('#authView').classList.remove('hidden');
 }
 
+const loadedTabs = new Set();
+function loadTab(name, button = null) {
+  // Each panel loads the first time it is opened, so /account?tab=profile does
+  // not spend four requests the visitor never looks at.
+  if (loadedTabs.has(name)) return;
+  loadedTabs.add(name);
+  if (name === 'recharge') loadPlans(button);
+  else if (name === 'orders') loadOrders(button);
+  else if (name === 'subscriptions') loadSubscriptions(button);
+}
+
 function showDashboard() {
   $('#accountLoading').classList.add('hidden');
   $('#authView').classList.add('hidden');
@@ -205,9 +223,7 @@ function showDashboard() {
   const tab = ['recharge', 'orders', 'subscriptions', 'profile'].includes(query().get('tab')) ? query().get('tab') : 'recharge';
   switchTab(tab, false);
   loadAccess();
-  loadPlans();
-  loadOrders();
-  loadSubscriptions();
+  loadTab(tab);
 }
 
 function renderProfile() {
@@ -260,6 +276,20 @@ async function logout() {
   location.href = '/';
 }
 
+async function changePassword(event) {
+  event.preventDefault();
+  const current = $('#currentPassword').value, next = $('#newPassword').value, confirm = $('#confirmPassword').value;
+  if (next !== confirm) return toast('两次输入的新密码不一致');
+  if (next.length < 10) return toast('新密码至少 10 位');
+  return withBusy($('#passwordSubmit'), async () => {
+    try {
+      const data = await api('/api/auth/password', { method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }) });
+      toast(data.message || '密码已更新');
+      $('#passwordForm').reset();
+    } catch (error) { toast(error.message); }
+  });
+}
+
 async function loadAccess() {
   try {
     const data = await api('/api/access');
@@ -269,12 +299,20 @@ async function loadAccess() {
     $('#pointsBreakdown').textContent = data.upstream_available
       ? `店铺赠送 ${bonus} · 支付宝 ${data.onepay_points === null ? '未知' : Number(data.onepay_points || 0)}${data.access_granted === false && data.onepay_points ? '（当前不可用）' : ''}`
       : `店铺赠送 ${bonus} · 支付宝积分暂不可用`;
-    $('#statUsed').textContent = Number.isFinite(data.used) ? data.used + Number(data.bonus_used || 0) : (data.bonus_used ? data.bonus_used + ' + ?' : '—');
+    $('#statUsed').textContent = Number.isFinite(data.spent_points) ? Number(data.spent_points).toLocaleString('zh-CN') : '—';
+    if (Number.isFinite(data.order_count)) $('#statOrders').textContent = Number(data.order_count);
+    const badge = $('#ordersBadge');
+    if (badge) {
+      const pending = Number(data.pending_orders || 0);
+      badge.textContent = pending ? String(pending) : '';
+      badge.classList.toggle('hidden', !pending);
+    }
     setPoints(points);
   } catch (error) {
     points = null;
     $('#statPoints').textContent = '—';
     $('#statUsed').textContent = '—';
+    $('#statOrders').textContent = '—';
     $('#pointsBreakdown').textContent = '积分暂不可用';
     toast(error.message);
   }
@@ -305,7 +343,7 @@ async function loadPlans(button) {
         <div class="plan-name">${esc(option.display_name || '积分套餐')}</div>
         <div class="plan-detail">${esc(planDetail(option))}</div>
         <div class="plan-price">${esc(option.price || '—')} <small>${esc(option.currency || 'CNY')}</small></div>
-        <button class="sbtn sm primary" ${open ? '' : 'disabled'} onclick="buyPoints('${esc(option.sku_id || '')}', this)">${open ? '支付宝充值' : '暂不可购买'}</button>
+        <button class="sbtn sm primary" type="button" data-sku="${esc(option.sku_id || '')}" ${open ? '' : 'disabled'}>${open ? '支付宝充值' : '暂不可购买'}</button>
       </article>`).join('');
     } catch (error) {
       grid.innerHTML = `<div class="empty-state"><b>暂时无法读取充值套餐</b>${esc(error.message)}</div>`;
@@ -314,12 +352,29 @@ async function loadPlans(button) {
   });
 }
 
+$('#planGrid').addEventListener('click', event => {
+  const button = event.target.closest('[data-sku]');
+  if (button) buyPoints(button.dataset.sku, button);
+});
+
+// Reuse one purchase intent per SKU for a short window: a double click must not
+// create two payment entries for the same package.
+function purchaseKeyFor(sku) {
+  const storageKey = 'onepay:pay:' + (sku || 'default');
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); } catch {}
+  const fresh = saved && typeof saved.key === 'string' && Date.now() - Number(saved.at || 0) < 15 * 60 * 1000;
+  const key = fresh ? saved.key : 'buy-' + crypto.randomUUID();
+  try { sessionStorage.setItem(storageKey, JSON.stringify({ key, at: Date.now() })); } catch {}
+  return key;
+}
+
 async function buyPoints(sku, button) {
   return withBusy(button, async () => {
     try {
       const data = await api('/api/purchase', {
         method: 'POST',
-        body: JSON.stringify({ idempotency_key: 'buy-' + crypto.randomUUID(), sku_id: sku })
+        body: JSON.stringify({ idempotency_key: purchaseKeyFor(sku), sku_id: sku })
       });
       if (data.status === 'READY' && data.purchase_url) {
         $('#payDetails').innerHTML = `<div><b>${esc(data.charging_option?.display_name || '积分充值')}</b></div>
@@ -341,6 +396,8 @@ function closePayAndRefresh() {
   loadAccess();
 }
 
+async function reloadOrders(button) { loadedTabs.add('orders'); return loadOrders(button); }
+async function reloadSubscriptions(button) { loadedTabs.add('subscriptions'); return loadSubscriptions(button); }
 async function loadOrders(button, append = false) {
   const serial = ++orderSerial, offset = append ? orderNext : 0;
   return withBusy(button, async () => {
@@ -348,7 +405,6 @@ async function loadOrders(button, append = false) {
       const data = await api('/api/orders?offset=' + offset);
       if (serial !== orderSerial) return;
       const freshItems = data.items || [];
-      if (!append) $('#statOrders').textContent = freshItems.filter(order => order.status === 'DELIVERED').length;
       const seen = new Set(append ? orderItems.map(order => order.key) : []);
       orderItems = append ? [...orderItems, ...freshItems.filter(order => !seen.has(order.key))] : freshItems;
       orderNext = data.next_offset; $('#ordersMore').classList.toggle('hidden', !data.has_more);
@@ -467,6 +523,7 @@ function switchTab(name, updateUrl = true) {
   });
   $$('.account-panel').forEach(panel => panel.classList.add('hidden'));
   $('#panel-' + name).classList.remove('hidden');
+  loadTab(name);
   if (updateUrl) {
     const next = new URLSearchParams(location.search);
     next.set('tab', name);
@@ -492,7 +549,7 @@ accountTabs.forEach((button, index) => {
 $('#year').textContent = new Date().getFullYear();
 
 (async () => {
-  const chrome = await initChrome('account');
+  const chrome = await initChrome('account', { points: false });
   me = chrome.me;
   if (!me) { showAuth(); return; }
   showDashboard();

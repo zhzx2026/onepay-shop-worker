@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f8f7fc">
+<link rel="icon" type="image/svg+xml" href="/assets/brand-logo.svg">
+<title>商品详情 · 云端积分商店</title>
+<link rel="stylesheet" href="/storefront.css?v=20261101-1">
+</head>
+<body>
+<div class="announcement"><span class="announcement-star">✳</span> 让每一份喜欢，都有迹可循 <span class="announcement-divider"></span> 数字好物 · 积分兑换</div>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="/" aria-label="返回首页">
+      <img class="brand-mark" src="/assets/brand-logo.svg" alt="">
+      <span class="brand-copy"><strong data-site-name>云端积分商店</strong><small>THE DIGITAL GOODS STORE</small></span>
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a class="nav-link" data-nav="home" href="/">首页</a>
+      <a class="nav-link" data-nav="shop" href="/shop">探索商品</a>
+      <a class="nav-link" data-nav="account" href="/account">个人中心</a>
+    </nav>
+    <div class="header-side">
+      <span class="points-chip hidden" data-points-wrap><b data-points>0</b><span>积分</span></span>
+      <a class="header-search" href="/shop" aria-label="搜索商品"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4 4" stroke-linecap="round"/></svg></a>
+      <a class="account-link" href="/account"><span class="account-dot" data-account-dot aria-hidden="true">↗</span><span data-account-label>登录 / 注册</span></a>
+    </div>
+  </div>
+</header>
+
+<main class="container product-page">
+  <div class="breadcrumb"><a href="/">首页</a><span>/</span><a href="/shop">探索商品</a><span>/</span><b id="crumbTitle">商品详情</b></div>
+  <div id="productLoading" class="empty-state">正在读取商品…</div>
+
+  <section id="productView" class="hidden" aria-labelledby="heroTitle">
+    <div class="product-hero">
+      <div class="product-hero-media" id="heroMedia"></div>
+      <div class="product-hero-info">
+        <div class="eyebrow"><span>DIGITAL GOODS</span> / <span id="heroCategory">数字好物</span></div>
+        <h1 id="heroTitle">商品</h1>
+        <p class="lead" id="heroSummary"></p>
+        <div class="product-tags" id="heroTags"></div>
+        <div class="hero-price-row">
+          <div class="price" id="heroPrice"></div>
+          <div class="stock-note" id="heroStock"></div>
+        </div>
+        <div id="heroSeries"></div>
+        <div class="actions hero-buy">
+          <button class="sbtn primary" id="buyButton" type="button">立即兑换</button>
+          <a class="sbtn" href="/shop">继续逛逛</a>
+        </div>
+        <p class="hero-note" id="heroNote">兑换成功后，内容会立刻出现在「我的已购」里。</p>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="panel-box detail-main">
+        <div class="panel-head"><div><div class="panel-eyebrow">ABOUT THIS GOODS</div><h3>商品详情</h3></div></div>
+        <div class="detail-desc" id="detailDesc"></div>
+        <div class="panel-head detail-delivery-head"><div><div class="panel-eyebrow">WHAT YOU GET</div><h3>交付方式</h3></div></div>
+        <p class="detail-delivery" id="detailDelivery"></p>
+        <button class="catalog-trigger hidden" id="catalogButton" type="button"><span aria-hidden="true">▤</span> 查看资源目录 <small id="catalogMeta"></small><b aria-hidden="true">↗</b></button>
+      </div>
+      <aside class="panel-box detail-side">
+        <h3>兑换说明</h3>
+        <ul class="detail-list">
+          <li><span aria-hidden="true">✳</span><div><b>积分统一结算</b>优先使用店铺赠送积分，不足部分使用支付宝积分。</div></li>
+          <li><span aria-hidden="true">✓</span><div><b>确认后才扣积分</b>兑换需要二次确认，未成功不会扣分。</div></li>
+          <li><span aria-hidden="true">♡</span><div><b>内容随时可取</b>交付内容保存在账户里，登录后可再次查看。</div></li>
+        </ul>
+        <a class="section-link" href="/account?tab=orders">前往我的已购 <span aria-hidden="true">↗</span></a>
+      </aside>
+    </div>
+
+    <section class="section related-section hidden" id="relatedSection" aria-labelledby="relatedTitle">
+      <div class="section-head">
+        <div><div class="eyebrow"><span>MORE</span> / LIKE THIS</div><h2 id="relatedTitle">你可能也会喜欢</h2></div>
+        <a class="section-link" href="/shop">查看全部商品 <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="product-grid" id="relatedGrid"></div>
+    </section>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-main">
+    <div class="footer-brand">
+      <a class="brand" href="/"><img class="brand-mark" src="/assets/brand-logo.svg" alt=""><span class="brand-copy"><strong data-site-name>云端积分商店</strong><small>THE DIGITAL GOODS STORE</small></span></a>
+      <p>收集一点灵感，发现更多喜欢。<br>让数字好物，陪伴每一天。</p>
+    </div>
+    <div class="footer-links"><strong>探索商店</strong><a href="/shop">全部商品</a><a href="/#categories">商品分类</a></div>
+    <div class="footer-links"><strong>我的账户</strong><a href="/account">个人中心</a><a href="/account?tab=orders">我的已购</a></div>
+    <div class="footer-note"><span>MADE FOR YOUR EVERYDAY</span><b>好东西，值得<br>被好好收藏。 <i>✳</i></b></div>
+  </div>
+  <div class="container footer-bottom"><span>© <span id="year"></span> <span data-site-name>云端积分商店</span></span><span>用一点积分，兑换一点喜欢。 &nbsp; ✦</span></div>
+</footer>
+
+<div class="modal" id="previewModal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+  <div class="modal-dialog catalog-dialog">
+    <button class="modal-close" aria-label="关闭目录" onclick="Store.setModal('#previewModal', false)">×</button>
+    <div class="catalog-kicker">WHAT'S INSIDE <span>✳</span></div>
+    <h2 id="previewTitle">资源目录</h2>
+    <p id="previewMeta"></p>
+    <div class="catalog-note">仅展示管理员审核的名称快照，点击文件夹展开。目录可能不完整或随资源更新；下载链接不会在此公开。</div>
+    <div class="catalog-controls"><span>目录内容</span><div><button type="button" onclick="toggleCatalog(true)">全部展开</button><button type="button" onclick="toggleCatalog(false)">全部收起</button></div></div>
+    <div class="catalog-list catalog-tree" id="previewList"></div>
+  </div>
+</div>
+
+<div class="modal" id="purchaseModal" role="dialog" aria-modal="true" aria-labelledby="purchaseTitle">
+  <div class="modal-dialog purchase-dialog">
+    <button class="modal-close" aria-label="关闭确认" onclick="Store.setModal('#purchaseModal', false)">×</button>
+    <div class="modal-kicker">A LITTLE SOMETHING FOR YOU <span>✳</span></div>
+    <h2 id="purchaseTitle">确认兑换</h2><p>请确认商品与兑换条件，确认后才会扣减积分。</p>
+    <div class="purchase-product"><div class="purchase-symbol" aria-hidden="true">✦</div><div><small id="purchaseKind">数字商品</small><b id="purchaseName"></b></div><strong id="purchasePrice"></strong></div>
+    <div id="purchaseTerms" class="purchase-terms"></div>
+    <div class="purchase-actions"><button class="sbtn" type="button" onclick="Store.setModal('#purchaseModal', false)">再想想</button><button class="sbtn primary" id="confirmPurchase" type="button">确认兑换 <span aria-hidden="true">↗</span></button></div>
+    <div class="purchase-foot">优先使用店铺赠送积分，不足部分使用支付宝积分。</div>
+  </div>
+</div>
+
+<div class="modal" id="deliveryModal" role="dialog" aria-modal="true" aria-labelledby="deliveryTitle">
+  <div class="modal-dialog">
+    <button class="modal-close" aria-label="关闭" onclick="Store.setModal('#deliveryModal', false)">×</button>
+    <div class="modal-kicker">SAVED TO YOUR COLLECTION <span>✳</span></div>
+    <h2 id="deliveryTitle">兑换成功</h2>
+    <p id="deliverySub">内容已保存到「我的已购」。</p>
+    <div id="deliveryBody"></div>
+  </div>
+</div>
+
+<script src="/storefront.js?v=20261101-1"></script>
+<script>
+const { $, $$, esc, api, toast, withBusy, setModal, initChrome, productCover, productHref, purchaseHint, setPoints, deliveryHtml, catalogTreeHtml, query } = Store;
+const productId = (query().get('id') || '').trim();
+let product = null, me = null, points = null, categories = [];
+let library = { owned_product_ids: [], subscriptions: [] }, libraryReady = false, libraryFailed = false;
+let purchaseDraft = null, purchaseInFlight = false;
+
+const subscriptionFor = id => (library.subscriptions || []).find(item => item.product_id === id);
+const subscriptionActive = sub => Boolean(sub && (sub.permanent || new Date(sub.expires_at).getTime() > Date.now()));
+const frequencyLabel = value => ({ DAILY: '每日更新', WEEKLY: '每周更新', IRREGULAR: '不定期更新' })[value] || '不定期更新';
+const deliveryLabel = type => ({ TEXT: '文本内容', LINK: '下载链接', FILE: '文件下载' })[type] || '数字交付';
+const isSoldOut = p => p.stock !== null && p.stock !== undefined && Number(p.stock) <= 0;
+
+function renderProduct() {
+  const p = product;
+  const series = p.product_kind === 'SUBSCRIPTION', sub = subscriptionFor(p.id);
+  const owned = (library.owned_product_ids || []).includes(p.id);
+  const soldOut = isSoldOut(p);
+  const category = categories.find(item => item.id === p.category_id)?.name || '数字好物';
+
+  document.title = `${p.title} · 云端积分商店`;
+  $('#crumbTitle').textContent = p.title;
+  $('#heroCategory').textContent = category;
+  $('#heroTitle').textContent = p.title;
+  $('#heroSummary').textContent = p.summary || '值得收藏的数字内容。';
+  $('#heroMedia').innerHTML = productCover(p, 0);
+  $('#heroTags').innerHTML = (p.tags || []).map(tag => `<a class="product-tag" href="/shop?tag=${encodeURIComponent(tag)}">${esc(tag)}</a>`).join('');
+  $('#heroPrice').innerHTML = `${Number(p.price_points).toLocaleString('zh-CN')} <small>积分</small>`;
+  $('#heroStock').textContent = p.stock === null || p.stock === undefined ? '不限量供应' : soldOut ? '已售罄' : `剩余 ${Number(p.stock)} 份`;
+  $('#heroSeries').innerHTML = series
+    ? `<div class="product-series"><span>↻ 系列订阅</span><span>${Number(p.subscription_days) ? Number(p.subscription_days) + ' 天 · 手动续费' : '永久有效'}</span><span>${esc(frequencyLabel(p.update_frequency))}</span></div>`
+    : '';
+  $('#detailDesc').innerHTML = p.description ? esc(p.description).replace(/\n/g, '<br>') : '<p class="detail-muted">管理员还没有填写更详细的介绍，可以先看看下面的交付方式。</p>';
+  $('#detailDelivery').textContent = series
+    ? '订阅成功后，在「我的订阅」里按有效期查看全部已发布更新；续费需手动操作，不会自动扣费。'
+    : p.delivery_type === 'TEXT' ? '兑换后直接在站内展示文本内容（卡密 / 提取码 / 使用说明），可一键复制。'
+      : p.delivery_type === 'LINK' ? '兑换后展示交付链接，可直接打开或复制保存。'
+        : '兑换后可下载文件，下载地址与你的订单绑定，仅本人可用。';
+
+  const files = Array.isArray(p.preview_files) ? p.preview_files : [];
+  const catalogButton = $('#catalogButton');
+  catalogButton.classList.toggle('hidden', !files.length);
+  if (files.length) {
+    catalogButton.classList.remove('hidden');
+    $('#catalogMeta').textContent = `${files.length} 项${p.preview_truncated ? ' · 部分' : ''}`;
+  }
+
+  const button = $('#buyButton');
+  button.dataset.buy = p.id;
+  const checkingAccount = !me ? false : !libraryReady && !libraryFailed;
+  const viewOwned = me && libraryReady && ((series && sub && (sub.permanent || soldOut)) || (!series && owned && (!p.allow_repeat || soldOut)));
+  if (viewOwned) {
+    button.textContent = series ? '查看我的订阅 ↗' : '查看已购内容 ↗';
+    button.disabled = false;
+    button.dataset.mode = 'owned';
+  } else if (libraryFailed && me) {
+    button.textContent = '重试账户状态 ↻';
+    button.disabled = false;
+    button.dataset.mode = 'retry';
+  } else {
+    button.dataset.mode = 'buy';
+    const enough = points === null ? null : Number(points) >= Number(p.price_points);
+    button.textContent = !me ? '登录后兑换 ↗'
+      : checkingAccount ? '确认账户中…'
+        : soldOut ? '已售罄'
+          : enough === false ? '积分不足'
+            : series ? (sub ? '手动续订 ↗' : '订阅系列 ↗') : owned ? '再次兑换 ↗' : '立即兑换 ↗';
+    button.disabled = checkingAccount || soldOut;
+  }
+}
+
+function renderRelated(items) {
+  const others = items.filter(item => item.id !== product.id).slice(0, 3);
+  if (!others.length) return;
+  $('#relatedGrid').innerHTML = others.map((item, index) => `<article class="product-card">
+      <a class="product-cover-link" href="${esc(productHref(item.id))}" tabindex="-1" aria-hidden="true">${productCover(item, index)}</a>
+      <div class="product-body">
+        <h3><a class="product-title-link" href="${esc(productHref(item.id))}">${esc(item.title)}</a></h3>
+        <p class="summary">${esc(item.summary || '')}</p>
+        <div class="product-footer"><div class="price">${Number(item.price_points)} <small>积分</small></div><a class="sbtn sm" href="${esc(productHref(item.id))}">查看详情 ↗</a></div>
+      </div>
+    </article>`).join('');
+  $('#relatedSection').classList.remove('hidden');
+}
+
+async function loadLibrary() {
+  if (!me) return;
+  try { library = await api('/api/library'); libraryReady = true; libraryFailed = false; }
+  catch { libraryReady = false; libraryFailed = true; }
+}
+async function loadAccess() {
+  if (!me) return;
+  try {
+    const data = await api('/api/access');
+    points = Number.isFinite(data.total_points) ? data.total_points : null;
+    setPoints(points);
+  } catch { points = null; }
+}
+async function refreshAfterPurchase() {
+  await Promise.all([loadAccess(), loadLibrary()]);
+  if (product) renderProduct();
+}
+
+async function loadCategories() {
+  try { categories = (await api('/api/categories')).items || []; } catch { categories = []; }
+  const category = categories.find(item => item.id === product?.category_id);
+  if (category) $('#heroCategory').textContent = category.name;
+  return category || null;
+}
+
+async function loadRelated(category) {
+  try {
+    const params = category ? '?category=' + encodeURIComponent(category.id) : '';
+    const data = await api('/api/products' + params);
+    renderRelated(data.items || []);
+  } catch {}
+}
+
+function storedPurchase(id) {
+  const slot = `onepay:pending:${me.id}:${id}`;
+  let key = null, quote = null;
+  try { key = sessionStorage.getItem(slot); } catch {}
+  try { quote = JSON.parse(sessionStorage.getItem(slot + ':quote') || 'null'); } catch {}
+  return { slot, key, quote: quote?.idempotency_key === key ? quote : null };
+}
+
+function openPurchase() {
+  if (purchaseInFlight) return toast('订单处理中，请稍候');
+  if (!me) { location.href = '/account?next=' + encodeURIComponent(location.pathname + location.search); return; }
+  const p = product, series = p.product_kind === 'SUBSCRIPTION', sub = subscriptionFor(p.id);
+  if (!libraryReady) return toast('请先刷新账户状态');
+  if ((!series && (library.owned_product_ids || []).includes(p.id) && !p.allow_repeat) || (series && sub?.permanent)) {
+    location.href = '/account?tab=' + (series ? 'subscriptions&product=' + encodeURIComponent(p.id) : 'orders'); return;
+  }
+  const previous = storedPurchase(p.id);
+  if (!previous.key && points !== null && points < Number(p.price_points)) { toast('积分不足，可在个人中心充值后再兑换'); return; }
+  const quote = previous.quote || { expected_price: Number(p.price_points), expected_kind: series ? 'SUBSCRIPTION' : 'SINGLE',
+    expected_days: series ? Number(p.subscription_days || 0) : 0, subscription_revision: series ? (sub?.revision || 'none') : null };
+  purchaseDraft = { product: p, series, sub, previous, quote };
+  $('#purchaseTitle').textContent = previous.key ? '继续上次兑换' : (series ? (sub ? '确认手动续订' : '确认订阅系列') : '确认兑换');
+  $('#purchaseName').textContent = p.title;
+  $('#purchaseKind').textContent = series ? '持续更新系列' : '数字商品';
+  $('#purchasePrice').textContent = quote.expected_price + ' 积分';
+  const term = series ? (quote.expected_days ? `${quote.expected_days} 天有效 · ${sub && subscriptionActive(sub) ? '从原到期日顺延' : '从开通时起计算'}` : '永久有效') : (p.allow_repeat ? '此商品允许重复兑换' : '每个账号仅可兑换一次');
+  $('#purchaseTerms').innerHTML = `<div><span>兑换规则</span><b>${esc(term)}</b></div>${series ? `<div><span>更新频率</span><b>${esc(frequencyLabel(p.update_frequency))}</b></div><p>仅手动续费，不会自动扣费。有效期内可查看历史和新增更新；已下载文件或已复制的外部链接无法收回。</p>` : '<p>确认后内容会保存至「我的已购」。</p>'}${previous.key ? '<p class="pending-warning">存在未确认的操作：将使用原订单编号重试或查询；如此前未提交成功，将按已确认条件尝试兑换。</p>' : ''}`;
+  $('#confirmPurchase').textContent = previous.key ? '继续确认' : (series && sub ? '确认续订' : '确认兑换');
+  setModal('#purchaseModal', true, '#confirmPurchase');
+}
+
+function setPurchaseBusy(busy) {
+  const modal = $('#purchaseModal');
+  if (busy) modal.setAttribute('aria-busy', 'true'); else modal.removeAttribute('aria-busy');
+  modal.querySelector('.modal-close').disabled = busy;
+  modal.querySelector('.purchase-actions .sbtn:not(#confirmPurchase)').disabled = busy;
+}
+
+async function submitPurchase(button) {
+  if (!purchaseDraft || purchaseInFlight || button.disabled) return;
+  const draft = purchaseDraft; purchaseInFlight = true; setPurchaseBusy(true);
+  return withBusy(button, async () => {
+    const modal = $('#purchaseModal'); modal.setAttribute('tabindex', '-1'); modal.focus({ preventScroll: true });
+    const { slot, key: previousKey, quote: previousQuote } = draft.previous;
+    const key = previousKey || 'ord-' + crypto.randomUUID();
+    const payload = previousQuote || { ...draft.quote, idempotency_key: key };
+    try { sessionStorage.setItem(slot, key); sessionStorage.setItem(slot + ':quote', JSON.stringify(payload)); } catch {}
+    try {
+      const result = await api(`/api/products/${encodeURIComponent(draft.product.id)}/purchase`, { method: 'POST', body: JSON.stringify(payload),
+        signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30000) : undefined });
+      setPurchaseBusy(false); setModal('#purchaseModal', false);
+      if (result.delivery) {
+        try { sessionStorage.removeItem(slot); sessionStorage.removeItem(slot + ':quote'); } catch {}
+        $('#deliveryTitle').textContent = (draft.series ? '订阅已开通 · ' : '兑换成功 · ') + (result.order?.title || '');
+        $('#deliverySub').textContent = `已扣减 ${result.order?.price_points ?? ''} 积分 · 订单号 ${result.order?.order_no || ''}`;
+        $('#deliveryBody').innerHTML = deliveryHtml(result.delivery) || '<div class="notice-line">该商品暂无交付内容，请联系管理员。</div>';
+        setModal('#deliveryModal', true, '.modal-close');
+      } else toast(result.message || '扣减结果待确认，请稍后在个人中心同步');
+      await refreshAfterPurchase();
+    } catch (error) {
+      if (error.status && error.status < 500) { try { sessionStorage.removeItem(slot); sessionStorage.removeItem(slot + ':quote'); } catch {} }
+      setPurchaseBusy(false); setModal('#purchaseModal', false);
+      const hint = purchaseHint(error);
+      toast(error.status ? hint.message : '兑换结果暂不确定，请使用原编号重试或在「我的已购」同步');
+      if (hint.action) setTimeout(() => { location.href = hint.action.href; }, 700);
+      await refreshAfterPurchase();
+    } finally { purchaseInFlight = false; setPurchaseBusy(false); }
+  });
+}
+
+$('#buyButton').addEventListener('click', event => {
+  const button = event.currentTarget;
+  if (button.dataset.mode === 'owned') {
+    location.href = product?.product_kind === 'SUBSCRIPTION' ? `/account?tab=subscriptions&product=${encodeURIComponent(product.id)}` : '/account?tab=orders';
+    return;
+  }
+  if (button.dataset.mode === 'retry') {
+    libraryReady = false; libraryFailed = false; renderProduct();
+    loadLibrary().then(() => { renderProduct(); if (libraryFailed) toast('无法读取账户状态，请检查网络或重新登录'); });
+    return;
+  }
+  openPurchase();
+});
+$('#confirmPurchase').addEventListener('click', event => submitPurchase(event.currentTarget));
+
+$('#catalogButton').addEventListener('click', () => {
+  if (!product) return;
+  const files = Array.isArray(product.preview_files) ? product.preview_files : [];
+  $('#previewTitle').textContent = product.title + ' · 资源目录';
+  const updated = product.preview_updated_at ? new Date(product.preview_updated_at).toLocaleDateString('zh-CN') : '未记录';
+  $('#previewMeta').textContent = `${files.length} 项${product.preview_truncated ? ' · 部分目录' : ''} · 更新于 ${updated}`;
+  $('#previewList').innerHTML = catalogTreeHtml(files);
+  setModal('#previewModal', true, '.modal-close');
+});
+function toggleCatalog(open) { $$('#previewList details').forEach(node => { node.open = open; }); }
+
+$('#year').textContent = new Date().getFullYear();
+
+(async () => {
+  const chrome = initChrome('shop', { points: false });
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(productId)) {
+    $('#productLoading').innerHTML = '<b>没有指定商品</b>请从商品目录重新进入。<div class="actions" style="justify-content:center;margin-top:14px"><a class="sbtn sm primary" href="/shop">前往商品目录 ↗</a></div>';
+    await chrome.catch(() => {});
+    return;
+  }
+  try {
+    const data = await api('/api/products/' + encodeURIComponent(productId));
+    product = data.product;
+  } catch (error) {
+    $('#productLoading').innerHTML = `<b>无法打开该商品</b>${esc(error.message)}<div class="actions" style="justify-content:center;margin-top:14px"><a class="sbtn sm primary" href="/shop">返回商品目录 ↗</a></div>`;
+    await chrome.catch(() => {});
+    return;
+  }
+  $('#productLoading').classList.add('hidden');
+  $('#productView').classList.remove('hidden');
+  renderProduct();
+
+  const { me: account } = await chrome.catch(() => ({ me: null }));
+  me = account || null;
+  renderProduct();
+  if (me) await Promise.all([loadAccess(), loadLibrary()]);
+  renderProduct();
+
+  const category = await loadCategories();
+  await loadRelated(category);
+})();
+</script>
+</body>
+</html>

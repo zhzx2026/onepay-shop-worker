@@ -11,7 +11,7 @@ const sqliteTest = (name, fn) => test(name, { skip: !DatabaseSync && 'requires N
 async function makeDb({ oldSchema = false } = {}) {
   const raw = new DatabaseSync(':memory:');
   const names = ['0001_init.sql', '0002_users_and_admin.sql', '0003_products_and_orders.sql', '0004_user_admin_roles.sql', '0005_categories_and_tags.sql', '0006_bonus_points.sql', '0007_catalog_agent.sql', '0008_subscriptions_and_repeat.sql'];
-  if (!oldSchema) names.push('0009_agent_pairing.sql');
+  if (!oldSchema) names.push('0009_agent_pairing.sql', '0010_auth_throttle.sql');
   for (const name of names) raw.exec(await readFile(new URL('../migrations/' + name, import.meta.url), 'utf8'));
   raw.exec(`INSERT INTO users(id,email,password_hash,created_at,role) VALUES
     ('admin_a','a@example.com','x','2026-01-01','admin'),
